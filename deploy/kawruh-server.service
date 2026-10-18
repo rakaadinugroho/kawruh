@@ -1,0 +1,32 @@
+[Unit]
+Description=Kawruh sync server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kawruh
+Group=kawruh
+EnvironmentFile=/etc/kawruh/kawruh.env
+ExecStart=/opt/kawruh/kawruh-server
+Restart=on-failure
+RestartSec=3
+
+# Hardening: the server only needs its data directory and the network.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+ReadWritePaths=/var/lib/kawruh
+MemoryMax=200M
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
