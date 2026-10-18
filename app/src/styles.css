@@ -298,6 +298,16 @@ button {
   max-width: 100%;
   height: auto;
 }
+/* Edge labels sit on the code block's surface, not Mermaid's theme grey
+   (its rules are id-scoped inside the SVG, hence !important). */
+.kw-mermaid .edgeLabel,
+.kw-mermaid .edgeLabel p,
+.kw-mermaid .labelBkg {
+  background-color: var(--raised) !important;
+}
+.kw-mermaid .edgeLabel rect {
+  fill: var(--raised) !important;
+}
 .kw-mermaid-error {
   font: 12px/1.5 var(--font-mono);
   color: var(--danger);

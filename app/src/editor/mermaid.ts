@@ -7,15 +7,7 @@ let seq = 0
 const dark = () => window.matchMedia('(prefers-color-scheme: dark)').matches
 
 function load(): Promise<Mermaid> {
-  loader ??= import('mermaid').then(({ default: m }) => {
-    m.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: dark() ? 'dark' : 'neutral',
-      fontFamily: getComputedStyle(document.body).fontFamily,
-    })
-    return m
-  })
+  loader ??= import('mermaid').then(({ default: m }) => m)
   return loader
 }
 
@@ -27,6 +19,13 @@ export function renderMermaidPreview(
   if (language.trim().toLowerCase() !== 'mermaid' || !content.trim()) return null
   load()
     .then(async (m) => {
+      // Configured per render so diagrams follow a system appearance change.
+      m.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: dark() ? 'dark' : 'neutral',
+        fontFamily: getComputedStyle(document.body).fontFamily,
+      })
       const el = document.createElement('div')
       try {
         const { svg } = await m.render(`kw-mermaid-${++seq}`, content)
