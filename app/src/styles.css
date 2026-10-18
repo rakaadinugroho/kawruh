@@ -1,0 +1,360 @@
+@import 'tailwindcss';
+@import '@milkdown/crepe/theme/common/style.css';
+@import '@fontsource-variable/literata/opsz.css';
+@import '@fontsource-variable/literata/opsz-italic.css';
+
+/* Ink on paper. Neutrals are tinted toward the ink hue (265) or the paper
+   hue (85); the accent is the navy of the app icon, amber is for people. */
+:root {
+  --paper: oklch(0.985 0.007 85);
+  --sidebar: oklch(0.945 0.012 85);
+  --raised: oklch(0.995 0.004 85);
+  --ink: oklch(0.24 0.03 265);
+  --ink-2: oklch(0.45 0.025 265);
+  --ink-3: oklch(0.62 0.018 265);
+  --line: oklch(0.885 0.012 85);
+  --hover: oklch(0.24 0.03 265 / 0.06);
+  --hover-2: oklch(0.24 0.03 265 / 0.1);
+  --accent: oklch(0.38 0.1 265);
+  --accent-ink: oklch(0.985 0.007 85);
+  --accent-soft: oklch(0.38 0.1 265 / 0.1);
+  --amber: oklch(0.68 0.13 62);
+  --amber-ink: oklch(0.5 0.12 50);
+  --danger: oklch(0.55 0.17 28);
+  --shadow-pop: 0 0 0 1px oklch(0.24 0.03 265 / 0.08), 0 8px 24px -6px oklch(0.24 0.03 265 / 0.18),
+    0 2px 6px oklch(0.24 0.03 265 / 0.08);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: oklch(0.2 0.014 265);
+    --sidebar: oklch(0.165 0.014 265);
+    --raised: oklch(0.245 0.016 265);
+    --ink: oklch(0.92 0.012 85);
+    --ink-2: oklch(0.74 0.014 85);
+    --ink-3: oklch(0.56 0.016 265);
+    --line: oklch(1 0 0 / 0.08);
+    --hover: oklch(1 0 0 / 0.05);
+    --hover-2: oklch(1 0 0 / 0.09);
+    --accent: oklch(0.8 0.07 262);
+    --accent-ink: oklch(0.2 0.014 265);
+    --accent-soft: oklch(0.8 0.07 262 / 0.14);
+    --amber: oklch(0.78 0.12 65);
+    --amber-ink: oklch(0.8 0.11 65);
+    --danger: oklch(0.7 0.15 28);
+    --shadow-pop: 0 0 0 1px oklch(1 0 0 / 0.08), 0 12px 32px -8px oklch(0 0 0 / 0.6);
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-sidebar: var(--sidebar);
+  --color-raised: var(--raised);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-hover: var(--hover);
+  --color-hover-2: var(--hover-2);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-amber: var(--amber);
+  --color-danger: var(--danger);
+  --font-serif: 'Literata Variable', 'Iowan Old Style', Georgia, serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI',
+    system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --shadow-pop: var(--shadow-pop);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Text the user writes or may want to copy stays selectable. */
+input,
+textarea,
+.milkdown,
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  cursor: default;
+}
+
+/* App chrome lives in a layer so Tailwind utilities on the same elements win. */
+@layer components {
+  /* Every pressable control acknowledges the press. */
+  .press {
+    transition-property: transform, background-color, color;
+    transition-duration: 120ms;
+    transition-timing-function: var(--ease-out-quint);
+  }
+  .press:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  /* Dialogs: native <dialog> for focus trapping; fade + slight scale in. */
+  dialog.kw-dialog {
+    margin: auto;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--ink);
+    max-width: calc(100vw - 48px);
+    overflow: visible;
+  }
+  dialog.kw-dialog::backdrop {
+    background: oklch(0.2 0.02 265 / 0.28);
+  }
+  @media (prefers-color-scheme: dark) {
+    dialog.kw-dialog::backdrop {
+      background: oklch(0 0 0 / 0.5);
+    }
+  }
+  dialog.kw-dialog[open] > .kw-dialog-panel {
+    animation: kw-pop-in 160ms var(--ease-out-quint);
+  }
+  @keyframes kw-pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97) translateY(4px);
+    }
+  }
+  .kw-menu {
+    animation: kw-menu-in 140ms var(--ease-out-quint);
+    transform-origin: top left;
+  }
+  @keyframes kw-menu-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    dialog.kw-dialog[open] > .kw-dialog-panel,
+    .kw-menu {
+      animation: none;
+    }
+    .press:active:not(:disabled) {
+      transform: none;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- editor */
+
+.milkdown {
+  --crepe-color-background: var(--paper);
+  --crepe-color-on-background: var(--ink);
+  --crepe-color-surface: var(--raised);
+  --crepe-color-surface-low: var(--sidebar);
+  --crepe-color-on-surface: var(--ink);
+  --crepe-color-on-surface-variant: var(--ink-2);
+  --crepe-color-outline: var(--ink-3);
+  --crepe-color-primary: var(--accent);
+  --crepe-color-secondary: var(--accent-soft);
+  --crepe-color-on-secondary: var(--ink);
+  --crepe-color-inverse: var(--ink);
+  --crepe-color-on-inverse: var(--paper);
+  --crepe-color-inline-code: var(--amber-ink);
+  --crepe-color-error: var(--danger);
+  --crepe-color-hover: var(--hover);
+  --crepe-color-selected: var(--accent-soft);
+  --crepe-color-inline-area: var(--hover-2);
+  --crepe-base-font-size: 17px;
+  --crepe-font-title: var(--font-serif);
+  --crepe-font-default: var(--font-serif);
+  --crepe-font-code: var(--font-mono);
+  --crepe-shadow-1: var(--shadow-pop);
+  --crepe-shadow-2: var(--shadow-pop);
+  background: transparent;
+}
+
+/* Editor chrome (menus, toolbars, tooltips) speaks the UI's sans, not the page's serif. */
+.milkdown .milkdown-slash-menu,
+.milkdown .milkdown-toolbar,
+.milkdown .milkdown-link-preview,
+.milkdown .milkdown-link-edit,
+.milkdown .milkdown-block-handle,
+.milkdown .milkdown-code-block .tools,
+.milkdown .milkdown-code-block .language-picker,
+.milkdown .milkdown-table-block .button-group {
+  font-family: var(--font-sans);
+}
+.milkdown .milkdown-slash-menu {
+  font-size: 13px;
+}
+
+.milkdown .ProseMirror {
+  padding: 2px 0 24px;
+  line-height: 1.72;
+  font-variation-settings: 'opsz' 16;
+}
+
+/* Headings stay below the 40px page title so the title keeps the top rank. */
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3,
+.milkdown .ProseMirror h4 {
+  font-weight: 620;
+  letter-spacing: -0.012em;
+  font-variation-settings: 'opsz' 36;
+  margin: 1.5em 0 0.35em;
+}
+.milkdown .ProseMirror h1 {
+  font-size: 1.75em;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+.milkdown .ProseMirror h2 {
+  font-size: 1.42em;
+  line-height: 1.28;
+}
+.milkdown .ProseMirror h3 {
+  font-size: 1.18em;
+  line-height: 1.35;
+}
+.milkdown .ProseMirror h4,
+.milkdown .ProseMirror h5,
+.milkdown .ProseMirror h6 {
+  font-size: 1em;
+  line-height: 1.5;
+}
+.milkdown .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+.milkdown .ProseMirror a {
+  color: var(--accent);
+  text-decoration-color: color-mix(in oklch, var(--accent) 40%, transparent);
+  text-underline-offset: 3px;
+}
+
+.milkdown .ProseMirror code {
+  font-size: 0.86em;
+}
+
+/* Collaborator cursors from y-prosemirror. */
+.ProseMirror-yjs-cursor {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 1px solid;
+  border-right: 1px solid;
+  border-color: var(--amber);
+  word-break: normal;
+  pointer-events: none;
+}
+.ProseMirror-yjs-cursor > div {
+  position: absolute;
+  top: -1.35em;
+  left: -1px;
+  font: 600 11px/1 var(--font-sans);
+  padding: 3px 5px;
+  border-radius: 4px 4px 4px 0;
+  color: white;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Mermaid previews inside code blocks. */
+.kw-mermaid {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+  overflow-x: auto;
+}
+.kw-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+.kw-mermaid-error {
+  font: 12px/1.5 var(--font-mono);
+  color: var(--danger);
+  white-space: pre-wrap;
+  padding: 8px 0;
+}
+
+/* Canvas block (node view). */
+.kw-canvas {
+  margin: 12px 0;
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.kw-canvas.ProseMirror-selectednode {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.kw-canvas-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  max-height: 480px;
+  padding: 16px;
+}
+.kw-canvas-preview img {
+  max-width: 100%;
+  max-height: 448px;
+}
+.kw-canvas-empty {
+  font: 13px/1.4 var(--font-sans);
+  color: var(--ink-3);
+}
+.kw-canvas-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-top: 1px solid var(--line);
+  font: 12px/1 var(--font-sans);
+  color: var(--ink-2);
+}
+.kw-canvas-bar button {
+  font: 500 12px/1 var(--font-sans);
+  color: var(--ink);
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--hover);
+}
+.kw-canvas-bar button:hover {
+  background: var(--hover-2);
+}
+
+@media (prefers-color-scheme: dark) {
+  .kw-canvas-preview img {
+    filter: invert(0.88) hue-rotate(180deg);
+  }
+}

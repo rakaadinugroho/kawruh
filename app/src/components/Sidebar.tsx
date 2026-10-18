@@ -1,0 +1,183 @@
+import {
+  Check,
+  ChevronsUpDown,
+  CloudDownload,
+  PanelLeftClose,
+  Plus,
+  Search,
+  Settings,
+  SquarePen,
+  Trash2,
+} from 'lucide-react'
+import type { DocHandle } from '../lib/docs'
+import type { WorkspaceView } from '../lib/hooks'
+import type { SyncState, WorkspaceInfo } from '../lib/ipc'
+import { currentWorkspace, useApp } from '../lib/store'
+import { createPage } from '../lib/workspace'
+import { PageTree } from './PageTree'
+import { IconButton, Kbd, Menu, type MenuItem, useMenuAnchor } from './ui'
+
+const statusCopy: Record<SyncState, string> = {
+  local: 'On this Mac only',
+  online: 'Synced',
+  connecting: 'Connecting…',
+  offline: 'Offline, saved on this Mac',
+  unauthorized: 'Signed out of server',
+}
+
+const statusDot: Record<SyncState, string> = {
+  local: 'bg-ink-3',
+  online: 'bg-[oklch(0.65_0.14_150)]',
+  connecting: 'bg-amber',
+  offline: 'bg-amber',
+  unauthorized: 'bg-danger',
+}
+
+export function host(url: string | null) {
+  if (!url) return ''
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+function Monogram({ name }: { name: string }) {
+  return (
+    <span className="flex size-[22px] shrink-0 items-center justify-center rounded-[5px] bg-accent font-serif text-[12px] font-semibold text-accent-ink">
+      {(name.trim()[0] ?? 'K').toUpperCase()}
+    </span>
+  )
+}
+
+export function StatusLine({ ws }: { ws: WorkspaceInfo }) {
+  return (
+    <span className="flex items-center gap-1.5 text-[12px] text-ink-3" data-testid="sync-status">
+      <span className={`size-1.5 rounded-full ${statusDot[ws.status]}`} />
+      {statusCopy[ws.status]}
+    </span>
+  )
+}
+
+export function Sidebar({ handle, view }: { handle: DocHandle | null; view: WorkspaceView }) {
+  const { workspaces, pageId, selectWorkspace, openPage, setDialog, toggleSidebar } = useApp()
+  const ws = useApp(currentWorkspace)
+  const switcher = useMenuAnchor()
+  const readonly = ws?.role === 'viewer'
+
+  const switchItems: MenuItem[] = [
+    ...workspaces.map((w) => ({
+      label: w.name || 'Untitled workspace',
+      hint: w.serverUrl ? host(w.serverUrl) : 'Local',
+      icon: w.id === ws?.id ? <Check size={14} /> : undefined,
+      onSelect: () => selectWorkspace(w.id),
+    })),
+    'separator',
+    {
+      label: 'New workspace…',
+      icon: <Plus size={14} />,
+      onSelect: () => setDialog({ kind: 'newWorkspace' }),
+    },
+    {
+      label: 'Add from server…',
+      icon: <CloudDownload size={14} />,
+      onSelect: () => setDialog({ kind: 'join' }),
+    },
+    {
+      label: 'Settings',
+      icon: <Settings size={14} />,
+      hint: '⌘,',
+      onSelect: () => setDialog({ kind: 'settings' }),
+    },
+  ]
+
+  const newPage = () => {
+    if (!handle) return
+    openPage(createPage(handle.doc))
+  }
+
+  return (
+    <aside className="flex h-full w-[260px] shrink-0 flex-col bg-sidebar" data-testid="sidebar">
+      <div data-tauri-drag-region className="flex h-[38px] shrink-0 items-center justify-end px-2">
+        <IconButton label="Hide sidebar (⌘\)" onClick={toggleSidebar}>
+          <PanelLeftClose size={15} />
+        </IconButton>
+      </div>
+
+      <div className="px-2">
+        <button
+          type="button"
+          data-testid="workspace-switcher"
+          onClick={(e) => switcher.openFrom(e.currentTarget)}
+          className="press flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-left hover:bg-hover"
+        >
+          <Monogram name={view.name || ws?.name || ''} />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">
+            {view.name || ws?.name || 'Kawruh'}
+          </span>
+          <ChevronsUpDown size={14} className="text-ink-3" />
+        </button>
+        <Menu at={switcher.at} items={switchItems} onClose={switcher.close} width={260} />
+
+        <button
+          type="button"
+          onClick={() => setDialog({ kind: 'quick' })}
+          className="press mt-1 flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] text-ink-2 hover:bg-hover"
+        >
+          <Search size={14} className="text-ink-3" />
+          <span className="flex-1 text-left">Search</span>
+          <Kbd>⌘K</Kbd>
+        </button>
+        {!readonly && (
+          <button
+            type="button"
+            data-testid="new-page"
+            onClick={newPage}
+            disabled={!handle}
+            className="press flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] text-ink-2 hover:bg-hover"
+          >
+            <SquarePen size={14} className="text-ink-3" />
+            <span className="flex-1 text-left">New page</span>
+            <Kbd>⌘N</Kbd>
+          </button>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between px-4 pb-1">
+        <span className="text-[11px] font-semibold tracking-[0.04em] text-ink-3 uppercase">Pages</span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2">
+        {handle && ws && (
+          <PageTree
+            workspaceId={ws.id}
+            doc={handle.doc}
+            all={view.all}
+            live={view.live}
+            currentPageId={pageId}
+            readonly={readonly}
+            onOpen={(id) => openPage(id || null)}
+          />
+        )}
+      </div>
+
+      <div className="flex shrink-0 flex-col gap-1 border-t border-line px-2 py-2">
+        <button
+          type="button"
+          onClick={() => setDialog({ kind: 'trash' })}
+          className="press flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] text-ink-2 hover:bg-hover"
+        >
+          <Trash2 size={14} className="text-ink-3" />
+          <span className="flex-1 text-left">Trash</span>
+          {view.trash.length > 0 && (
+            <span className="text-[11px] tabular-nums text-ink-3">{view.trash.length}</span>
+          )}
+        </button>
+        {ws && (
+          <div className="flex h-6 items-center px-2">
+            <StatusLine ws={ws} />
+          </div>
+        )}
+      </div>
+    </aside>
+  )
+}
