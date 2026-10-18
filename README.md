@@ -2,11 +2,28 @@
 
 A markdown notebook for the desktop. Pages nest like Notion, the editor is
 WYSIWYG but everything is markdown underneath, and Mermaid diagrams and canvas
-drawings live right in the page. Workspaces stay on your Mac until you publish
+drawings live right in the page. Workspaces stay on your computer until you publish
 them to your own Kawruh server; then people edit together live, read-only links
 can be shared, and AI agents can read and write pages over MCP.
 
 *Kawruh* is Javanese for knowledge.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hero-dark.png">
+  <img alt="Kawruh with a nested page tree in the sidebar and a page showing a Mermaid diagram and a checklist" src="docs/screenshots/hero-light.png">
+</picture>
+
+| Canvas drawings sit inside the page | ⌘K jumps to any page |
+|---|---|
+| <img alt="A page with an embedded hand-drawn canvas sketch" src="docs/screenshots/canvas.png"> | <img alt="The quick switcher filtering pages by title" src="docs/screenshots/switcher.png"> |
+
+## Download
+
+Get the latest `.dmg` (macOS 11+, Apple Silicon and Intel) or `setup.exe`
+(Windows 10/11) from [Releases](https://github.com/rakaadinugroho/kawruh/releases/latest).
+The builds aren't signed by Apple or Microsoft yet, so the first launch takes one
+extra click: on macOS, System Settings → Privacy & Security → **Open Anyway**; on
+Windows, **More info → Run anyway**.
 
 ## How it fits together
 
