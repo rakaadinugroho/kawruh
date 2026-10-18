@@ -44,7 +44,7 @@ All optional. Without any of them the release still builds.
 
 | Name | Kind | Purpose |
 |---|---|---|
-| `KAWRUH_DEFAULT_SERVER` | variable | Prefills the server field on the sign-in screen, e.g. `http://<host>:7420` |
+| `KAWRUH_DEFAULT_SERVER` | variable | Prefills the server field on the sign-in screen, e.g. `http://<host>:7420`. It is compiled into the downloadable app, so leave it unset if the address should stay private. |
 | `APPLE_CERTIFICATE` | secret | Developer ID Application certificate, `.p12` as base64 |
 | `APPLE_CERTIFICATE_PASSWORD` | secret | Password of that `.p12` |
 | `APPLE_SIGNING_IDENTITY` | secret | e.g. `Developer ID Application: Name (TEAMID)` |
