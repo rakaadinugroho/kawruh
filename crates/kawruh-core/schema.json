@@ -1,0 +1,382 @@
+{
+  "topNode": "doc",
+  "nodes": {
+    "doc": {
+      "group": null,
+      "content": "block+",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {}
+    },
+    "paragraph": {
+      "group": "block",
+      "content": "inline*",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {}
+    },
+    "heading": {
+      "group": "block",
+      "content": "inline*",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {
+        "id": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        },
+        "level": {
+          "required": false,
+          "default": 1,
+          "validate": "number"
+        }
+      }
+    },
+    "hardbreak": {
+      "group": "inline",
+      "content": null,
+      "marks": null,
+      "inline": true,
+      "atom": false,
+      "code": false,
+      "attrs": {
+        "isInline": {
+          "required": false,
+          "default": false,
+          "validate": "boolean"
+        }
+      }
+    },
+    "blockquote": {
+      "group": "block",
+      "content": "block+",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {}
+    },
+    "code_block": {
+      "group": "block",
+      "content": "text*",
+      "marks": "",
+      "inline": false,
+      "atom": false,
+      "code": true,
+      "attrs": {
+        "language": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        }
+      }
+    },
+    "hr": {
+      "group": "block",
+      "content": null,
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {}
+    },
+    "image": {
+      "group": "inline",
+      "content": null,
+      "marks": "",
+      "inline": true,
+      "atom": true,
+      "code": false,
+      "attrs": {
+        "src": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        },
+        "alt": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        },
+        "title": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        }
+      }
+    },
+    "bullet_list": {
+      "group": "block",
+      "content": "listItem+",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {
+        "spread": {
+          "required": false,
+          "default": false,
+          "validate": "boolean"
+        }
+      }
+    },
+    "ordered_list": {
+      "group": "block",
+      "content": "listItem+",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {
+        "order": {
+          "required": false,
+          "default": 1,
+          "validate": "number"
+        },
+        "spread": {
+          "required": false,
+          "default": false,
+          "validate": "boolean"
+        }
+      }
+    },
+    "list_item": {
+      "group": "listItem",
+      "content": "paragraph block*",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {
+        "label": {
+          "required": false,
+          "default": "•",
+          "validate": "string"
+        },
+        "listType": {
+          "required": false,
+          "default": "bullet",
+          "validate": "string"
+        },
+        "spread": {
+          "required": false,
+          "default": true,
+          "validate": "boolean"
+        },
+        "checked": {
+          "required": false,
+          "default": null,
+          "validate": "boolean|null"
+        }
+      }
+    },
+    "html": {
+      "group": "inline",
+      "content": null,
+      "marks": null,
+      "inline": true,
+      "atom": true,
+      "code": false,
+      "attrs": {
+        "value": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        }
+      }
+    },
+    "text": {
+      "group": "inline",
+      "content": null,
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {}
+    },
+    "table": {
+      "group": "block",
+      "content": "table_header_row table_row+",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {}
+    },
+    "table_header_row": {
+      "group": null,
+      "content": "(table_header)*",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {}
+    },
+    "table_row": {
+      "group": null,
+      "content": "(table_cell)*",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {}
+    },
+    "table_header": {
+      "group": null,
+      "content": "paragraph",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {
+        "colspan": {
+          "required": false,
+          "default": 1,
+          "validate": "number"
+        },
+        "rowspan": {
+          "required": false,
+          "default": 1,
+          "validate": "number"
+        },
+        "colwidth": {
+          "required": false,
+          "default": null,
+          "validate": null
+        },
+        "alignment": {
+          "required": false,
+          "default": "left",
+          "validate": null
+        }
+      }
+    },
+    "table_cell": {
+      "group": null,
+      "content": "paragraph",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {
+        "colspan": {
+          "required": false,
+          "default": 1,
+          "validate": "number"
+        },
+        "rowspan": {
+          "required": false,
+          "default": 1,
+          "validate": "number"
+        },
+        "colwidth": {
+          "required": false,
+          "default": null,
+          "validate": null
+        },
+        "alignment": {
+          "required": false,
+          "default": "left",
+          "validate": null
+        }
+      }
+    },
+    "footnote_definition": {
+      "group": "block",
+      "content": "block+",
+      "marks": null,
+      "inline": false,
+      "atom": false,
+      "code": false,
+      "attrs": {
+        "label": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        }
+      }
+    },
+    "footnote_reference": {
+      "group": "inline",
+      "content": null,
+      "marks": null,
+      "inline": true,
+      "atom": true,
+      "code": false,
+      "attrs": {
+        "label": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        }
+      }
+    },
+    "kawruh_canvas": {
+      "group": "block",
+      "content": null,
+      "marks": "",
+      "inline": false,
+      "atom": true,
+      "code": false,
+      "attrs": {
+        "id": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        }
+      }
+    }
+  },
+  "marks": {
+    "emphasis": {
+      "attrs": {
+        "marker": {
+          "required": false,
+          "default": "*",
+          "validate": "string"
+        }
+      },
+      "excludesSelf": true
+    },
+    "strong": {
+      "attrs": {
+        "marker": {
+          "required": false,
+          "default": "*",
+          "validate": "string"
+        }
+      },
+      "excludesSelf": true
+    },
+    "inlineCode": {
+      "attrs": {},
+      "excludesSelf": true
+    },
+    "link": {
+      "attrs": {
+        "href": {
+          "required": true,
+          "default": null,
+          "validate": "string"
+        },
+        "title": {
+          "required": false,
+          "default": null,
+          "validate": "string|null"
+        }
+      },
+      "excludesSelf": true
+    },
+    "strike_through": {
+      "attrs": {},
+      "excludesSelf": true
+    }
+  }
+}

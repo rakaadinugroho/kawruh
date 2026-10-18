@@ -1,0 +1,49 @@
+//! Markdown ↔ page document conversion.
+
+pub mod parse;
+pub mod serialize;
+pub mod ydoc;
+
+use yrs::{Doc, Transact, XmlFragmentRef};
+
+use crate::schema::FRAGMENT;
+
+pub use parse::markdown_to_pnode;
+pub use serialize::pnode_to_markdown;
+
+pub fn fragment(doc: &Doc) -> XmlFragmentRef {
+    doc.get_or_insert_xml_fragment(FRAGMENT)
+}
+
+/// Markdown of a page document.
+pub fn doc_to_markdown(doc: &Doc) -> String {
+    let frag = fragment(doc);
+    let txn = doc.transact();
+    pnode_to_markdown(&ydoc::read_fragment(&txn, &frag))
+}
+
+/// Replaces the page content with `md`, as a single transaction tagged `origin`.
+pub fn set_markdown(doc: &Doc, md: &str, origin: &str) {
+    let pnode = markdown_to_pnode(md);
+    let frag = fragment(doc);
+    let mut txn = doc.transact_mut_with(origin);
+    ydoc::replace_fragment(&mut txn, &frag, &pnode);
+}
+
+/// Appends `md` after the existing page content.
+pub fn append_markdown(doc: &Doc, md: &str, origin: &str) {
+    let pnode = markdown_to_pnode(md);
+    let frag = fragment(doc);
+    let mut txn = doc.transact_mut_with(origin);
+    ydoc::append_fragment(&mut txn, &frag, &pnode);
+}
+
+/// Renders markdown to sanitized HTML (raw HTML is escaped).
+pub fn markdown_to_html(md: &str) -> String {
+    let mut o = parse::options();
+    o.render.escape = true;
+    comrak::markdown_to_html(md, &o)
+}
+
+#[cfg(test)]
+mod tests;
