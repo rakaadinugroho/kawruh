@@ -2,9 +2,11 @@
 //! does not support macOS). With `KAWRUH_E2E_PORT` set, a localhost HTTP
 //! endpoint accepts `POST /eval` with a JS body; the script runs in the main
 //! webview (async allowed, `return` a JSON-serializable value) and the
-//! response is `{ ok, value }`. `POST /snapshot` with an output path writes a
-//! TIFF of the webview (WKWebView.takeSnapshot; no screen-recording permission
-//! needed). Compiled out of release builds.
+//! response is `{ ok, value }`. A body of `SNAPSHOT <path> [width]` writes a
+//! TIFF of the webview instead (WKWebView.takeSnapshot; no screen-recording
+//! permission needed); `width` in points re-renders it larger than the window.
+//! `THEME dark|light|system` switches the window appearance. Compiled out of
+//! release builds.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -58,8 +60,15 @@ pub fn start(app: AppHandle) {
                     Some(b) => b,
                     None => return,
                 };
-                let (ok, value) = if body.starts_with("SNAPSHOT ") {
-                    snapshot(&app, body.trim_start_matches("SNAPSHOT ").trim()).await
+                let (ok, value) = if let Some(args) = body.strip_prefix("SNAPSHOT ") {
+                    let args = args.trim();
+                    let (path, width) = match args.rsplit_once(' ') {
+                        Some((p, w)) if w.parse::<f64>().is_ok() => (p, w.parse().ok()),
+                        _ => (args, None),
+                    };
+                    snapshot(&app, path, width).await
+                } else if let Some(theme) = body.strip_prefix("THEME ") {
+                    set_theme(&app, theme.trim())
                 } else {
                     eval(&app, id, &body).await
                 };
@@ -132,12 +141,28 @@ async fn eval(app: &AppHandle, id: u64, js: &str) -> (bool, String) {
     }
 }
 
+fn set_theme(app: &AppHandle, theme: &str) -> (bool, String) {
+    let Some(win) = app.get_webview_window("main") else {
+        return (false, "no main window".into());
+    };
+    let theme = match theme {
+        "dark" => Some(tauri::Theme::Dark),
+        "light" => Some(tauri::Theme::Light),
+        _ => None,
+    };
+    match win.set_theme(theme) {
+        Ok(()) => (true, format!("{theme:?}")),
+        Err(e) => (false, e.to_string()),
+    }
+}
+
 #[cfg(target_os = "macos")]
-async fn snapshot(app: &AppHandle, path: &str) -> (bool, String) {
+async fn snapshot(app: &AppHandle, path: &str, width: Option<f64>) -> (bool, String) {
     use block2::RcBlock;
+    use objc2::MainThreadMarker;
     use objc2_app_kit::NSImage;
-    use objc2_foundation::NSError;
-    use objc2_web_kit::WKWebView;
+    use objc2_foundation::{NSError, NSNumber};
+    use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
 
     let Some(win) = app.get_webview_window("main") else {
         return (false, "no main window".into());
@@ -156,7 +181,11 @@ async fn snapshot(app: &AppHandle, path: &str) -> (bool, String) {
                 .map(|d| d.to_vec());
             let _ = tx.send(bytes);
         });
-        wk.takeSnapshotWithConfiguration_completionHandler(None, &block);
+        let config = WKSnapshotConfiguration::new(MainThreadMarker::new().unwrap());
+        if let Some(w) = width {
+            config.setSnapshotWidth(Some(&NSNumber::new_f64(w)));
+        }
+        wk.takeSnapshotWithConfiguration_completionHandler(Some(&config), &block);
     });
     if let Err(e) = res {
         return (false, e.to_string());
@@ -171,6 +200,6 @@ async fn snapshot(app: &AppHandle, path: &str) -> (bool, String) {
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn snapshot(_app: &AppHandle, _path: &str) -> (bool, String) {
+async fn snapshot(_app: &AppHandle, _path: &str, _width: Option<f64>) -> (bool, String) {
     (false, "snapshots are only implemented on macOS".into())
 }
