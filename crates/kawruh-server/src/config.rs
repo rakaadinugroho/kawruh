@@ -1,0 +1,41 @@
+//! Server configuration from the environment (see docs/API.md).
+
+use std::net::SocketAddr;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub bind: SocketAddr,
+    pub data_dir: PathBuf,
+    pub public_url: String,
+    pub allow_signup: bool,
+    pub min_free_mb: u64,
+}
+
+impl Config {
+    pub fn from_env() -> anyhow::Result<Config> {
+        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+        Ok(Config {
+            bind: var("KAWRUH_BIND")
+                .unwrap_or_else(|| "0.0.0.0:7420".into())
+                .parse()?,
+            data_dir: var("KAWRUH_DATA").unwrap_or_else(|| "./data".into()).into(),
+            public_url: var("KAWRUH_PUBLIC_URL")
+                .unwrap_or_else(|| "http://localhost:7420".into())
+                .trim_end_matches('/')
+                .to_string(),
+            allow_signup: var("KAWRUH_ALLOW_SIGNUP")
+                .map(|v| {
+                    !matches!(
+                        v.to_ascii_lowercase().as_str(),
+                        "0" | "false" | "no" | "off"
+                    )
+                })
+                .unwrap_or(true),
+            min_free_mb: var("KAWRUH_MIN_FREE_MB")
+                .map(|v| v.parse())
+                .transpose()?
+                .unwrap_or(50),
+        })
+    }
+}

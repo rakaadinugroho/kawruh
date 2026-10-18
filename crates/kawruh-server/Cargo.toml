@@ -1,0 +1,40 @@
+[package]
+name = "kawruh-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "kawruh-server"
+path = "src/main.rs"
+
+[dependencies]
+kawruh-core = { path = "../kawruh-core" }
+yrs.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+base64.workspace = true
+rand.workspace = true
+sha2.workspace = true
+hex.workspace = true
+axum = { version = "0.8", features = ["ws"] }
+http = "1"
+argon2 = "0.6"
+libc = "0.2"
+rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server"] }
+schemars = "1"
+
+[dev-dependencies]
+tempfile = "3"
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
