@@ -2,6 +2,7 @@ import { Check, Laptop, Server } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { type RemoteWorkspace, api } from '../lib/ipc'
 import { useApp } from '../lib/store'
+import { isMac } from '../lib/platform'
 import { AccountForm } from './AccountForm'
 import { host } from './Sidebar'
 import { Button, Dialog, Field, inputClass } from './ui'
@@ -21,7 +22,7 @@ export function NewWorkspaceDialog({ open, onClose }: { open: boolean; onClose: 
   }, [open])
 
   const options = [
-    { id: 'local', label: 'This Mac only', detail: 'Private. Publish to a server any time.', icon: <Laptop size={15} /> },
+    { id: 'local', label: isMac ? 'This Mac only' : 'This computer only', detail: 'Private. Publish to a server any time.', icon: <Laptop size={15} /> },
     ...loggedIn.map((a) => ({
       id: a.id,
       label: host(a.serverUrl),

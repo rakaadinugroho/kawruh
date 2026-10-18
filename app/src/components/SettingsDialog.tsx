@@ -2,6 +2,7 @@ import { Copy, KeyRound, LogOut, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { type ApiToken, type AppInfo, api } from '../lib/ipc'
 import { useApp } from '../lib/store'
+import { thisDevice } from '../lib/platform'
 import { AccountForm } from './AccountForm'
 import { host } from './Sidebar'
 import { Button, Dialog, Field, IconButton, copyText, inputClass } from './ui'
@@ -257,7 +258,7 @@ function AboutTab() {
         <span className="tabular-nums">{info?.version}</span>
       </p>
       <p className="leading-relaxed">
-        Kawruh is Javanese for knowledge. Pages are markdown underneath, stored on this Mac and
+        Kawruh is Javanese for knowledge. Pages are markdown underneath, stored on {thisDevice} and
         synced to your server when a workspace is shared.
       </p>
       {info && (

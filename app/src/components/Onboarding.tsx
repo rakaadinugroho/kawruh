@@ -2,6 +2,7 @@ import { ArrowRight, Laptop, Server } from 'lucide-react'
 import { useState } from 'react'
 import { api } from '../lib/ipc'
 import { useApp } from '../lib/store'
+import { thisDevice } from '../lib/platform'
 import { AccountForm } from './AccountForm'
 
 /// First run: no workspace yet.
@@ -33,7 +34,7 @@ export function Onboarding() {
             Kawruh
           </h1>
           <p className="mt-3 max-w-[440px] font-serif text-[18px] leading-relaxed text-ink-2">
-            A markdown notebook you own. Write on this Mac, nest pages as deep as you like, and share
+            A markdown notebook you own. Write on {thisDevice}, nest pages as deep as you like, and share
             through your own server when you're ready.
           </p>
 
@@ -55,7 +56,7 @@ export function Onboarding() {
               >
                 <Laptop size={18} />
                 <span className="flex-1">
-                  <span className="block text-[14px] font-semibold">Start writing on this Mac</span>
+                  <span className="block text-[14px] font-semibold">Start writing on {thisDevice}</span>
                   <span className="block text-[12px] opacity-80">No account needed. Publish later.</span>
                 </span>
                 <ArrowRight size={16} className="transition-transform duration-150 group-hover:translate-x-0.5" />

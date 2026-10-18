@@ -8,7 +8,7 @@ Kawruh is a markdown notebook. Everything you write here is plain markdown under
 
 ## Organize
 
-Pages nest like folders. Hover a page in the sidebar and click **+** to add a sub-page, drag pages to reorder or move them, and press **⌘K** to jump anywhere.
+Pages nest like folders. Hover a page in the sidebar and click **+** to add a sub-page, drag pages to reorder or move them, and press **⌘K** (**Ctrl+K** on Windows) to jump anywhere.
 
 ## Diagrams
 

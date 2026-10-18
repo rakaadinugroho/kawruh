@@ -14,14 +14,15 @@ import type { WorkspaceView } from '../lib/hooks'
 import type { SyncState, WorkspaceInfo } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
 import { createPage } from '../lib/workspace'
+import { key, thisDevice } from '../lib/platform'
 import { PageTree } from './PageTree'
 import { IconButton, Kbd, Menu, type MenuItem, useMenuAnchor } from './ui'
 
 const statusCopy: Record<SyncState, string> = {
-  local: 'On this Mac only',
+  local: `On ${thisDevice} only`,
   online: 'Synced',
   connecting: 'Connecting…',
-  offline: 'Offline, saved on this Mac',
+  offline: `Offline, saved on ${thisDevice}`,
   unauthorized: 'Signed out of server',
 }
 
@@ -86,7 +87,7 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
     {
       label: 'Settings',
       icon: <Settings size={14} />,
-      hint: '⌘,',
+      hint: key(','),
       onSelect: () => setDialog({ kind: 'settings' }),
     },
   ]
@@ -99,7 +100,7 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
   return (
     <aside className="flex h-full w-[260px] shrink-0 flex-col bg-sidebar" data-testid="sidebar">
       <div data-tauri-drag-region className="flex h-[38px] shrink-0 items-center justify-end px-2">
-        <IconButton label="Hide sidebar (⌘\)" onClick={toggleSidebar}>
+        <IconButton label={`Hide sidebar (${key('\\')})`} onClick={toggleSidebar}>
           <PanelLeftClose size={15} />
         </IconButton>
       </div>
@@ -126,7 +127,7 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
         >
           <Search size={14} className="text-ink-3" />
           <span className="flex-1 text-left">Search</span>
-          <Kbd>⌘K</Kbd>
+          <Kbd>{key('K')}</Kbd>
         </button>
         {!readonly && (
           <button
@@ -138,7 +139,7 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
           >
             <SquarePen size={14} className="text-ink-3" />
             <span className="flex-1 text-left">New page</span>
-            <Kbd>⌘N</Kbd>
+            <Kbd>{key('N')}</Kbd>
           </button>
         )}
       </div>

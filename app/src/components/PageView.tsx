@@ -19,6 +19,7 @@ import type { DocHandle } from '../lib/docs'
 import { type WorkspaceView, colorFor, useDoc, usePeers } from '../lib/hooks'
 import { api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
+import { key } from '../lib/platform'
 import {
   type Page,
   childrenOf,
@@ -199,7 +200,7 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
         className={`flex h-11 shrink-0 items-center gap-2 pr-3 ${sidebarOpen ? 'pl-3' : 'pl-[78px]'}`}
       >
         {!sidebarOpen && (
-          <IconButton label="Show sidebar (⌘\)" onClick={toggleSidebar}>
+          <IconButton label={`Show sidebar (${key('\\')})`} onClick={toggleSidebar}>
             <PanelLeftOpen size={15} />
           </IconButton>
         )}
@@ -256,7 +257,7 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
           <div className="flex h-full flex-col items-center justify-center gap-3 pb-24 text-center">
             <p className="font-serif text-[22px] text-ink-2">Nothing open.</p>
             <p className="max-w-[300px] text-[13px] text-ink-3">
-              Pick a page in the sidebar, press ⌘K to search, or start a new one.
+              Pick a page in the sidebar, press {key('K')} to search, or start a new one.
             </p>
             {!readonly && wsHandle && (
               <Button variant="primary" onClick={() => openPage(createPage(wsHandle.doc))}>

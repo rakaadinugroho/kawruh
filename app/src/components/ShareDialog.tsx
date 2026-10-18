@@ -4,6 +4,7 @@ import { colorFor } from '../lib/hooks'
 import { type Member, type Role, type Share, api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
 import type { Page } from '../lib/workspace'
+import { thisDevice } from '../lib/platform'
 import { AccountForm } from './AccountForm'
 import { host } from './Sidebar'
 import { Button, Dialog, IconButton, copyText, inputClass } from './ui'
@@ -33,9 +34,9 @@ function PublishPanel() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-[13px] leading-relaxed text-ink-2">
-        <span className="font-medium text-ink">{ws.name}</span> lives only on this Mac. Publish it to
+        <span className="font-medium text-ink">{ws.name}</span> lives only on {thisDevice}. Publish it to
         a server to invite collaborators, edit together live, and create public links. Everything
-        stays on this Mac too.
+        stays on {thisDevice} too.
       </p>
       {loggedIn.length === 0 ? (
         <div className="rounded-lg bg-paper p-4 shadow-[inset_0_0_0_1px_var(--line)]">
