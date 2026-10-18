@@ -2,8 +2,9 @@
 # Cross-compiles kawruh-server for the homelab (aarch64, static musl) and
 # installs it as the `kawruh-server` systemd service.
 #
-#   deploy/deploy.sh [user@host]              build, upload, install, restart
-#   deploy/deploy.sh --rollback [user@host]   restore the previous binary
+#   deploy/deploy.sh [user@host]                  build, upload, install, restart
+#   deploy/deploy.sh --release vX.Y.Z [user@host] install a GitHub release build instead
+#   deploy/deploy.sh --rollback [user@host]       restore the previous binary
 #
 # Host: the user@host argument, else KAWRUH_HOST (deploy/.env.local is read if present).
 # Auth: SSH keys, or set KAWRUH_SSH_PASS to use sshpass.
@@ -13,7 +14,11 @@ ENV_LOCAL="$(dirname "$0")/.env.local"
 if [[ -f "$ENV_LOCAL" ]]; then source "$ENV_LOCAL"; fi
 
 ROLLBACK=false
-if [[ "${1:-}" == "--rollback" ]]; then ROLLBACK=true; shift; fi
+RELEASE=""
+case "${1:-}" in
+  --rollback) ROLLBACK=true; shift ;;
+  --release) RELEASE="${2:?usage: deploy.sh --release vX.Y.Z [user@host]}"; shift 2 ;;
+esac
 HOST="${1:-${KAWRUH_HOST:?set KAWRUH_HOST=user@host or pass user@host}}"
 PUBLIC_URL="${KAWRUH_PUBLIC_URL:-http://${HOST#*@}:7420}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -48,8 +53,19 @@ if $ROLLBACK; then
   exit 0
 fi
 
-echo "==> building $TARGET"
-(cd "$ROOT" && cargo zigbuild --release --target "$TARGET" -p kawruh-server)
+if [[ -n "$RELEASE" ]]; then
+  echo "==> downloading $RELEASE ($TARGET) from GitHub"
+  ASSET="kawruh-server-$RELEASE-$TARGET.tar.gz"
+  DL="$(mktemp -d)"
+  trap 'rm -rf "$DL"' EXIT
+  (cd "$ROOT" && gh release download "$RELEASE" --dir "$DL" --pattern "$ASSET" --pattern SHA256SUMS.txt)
+  (cd "$DL" && grep " $ASSET\$" SHA256SUMS.txt | shasum -a 256 -c -)
+  tar -xzf "$DL/$ASSET" -C "$DL"
+  BIN="$DL/kawruh-server"
+else
+  echo "==> building $TARGET"
+  (cd "$ROOT" && cargo zigbuild --release --target "$TARGET" -p kawruh-server)
+fi
 
 echo "==> checking free disk on $HOST"
 FREE_KB=$("${SSH[@]}" "$HOST" "df -Pk / | awk 'NR==2{print \$4}'")

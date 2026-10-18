@@ -58,12 +58,24 @@ cd app && pnpm tauri build                 # target/release/bundle/macos/Kawruh.
 pnpm tauri build --bundles app             # just the .app
 ```
 
-The build is unsigned; macOS opens it without complaint when built on the same Mac.
+Local builds are ad-hoc signed; macOS opens them without complaint on the Mac that built them.
+
+## Release
+
+Pushing a version tag builds the macOS (universal `.dmg`) and Windows (`setup.exe`)
+apps plus the server binaries on GitHub Actions and publishes them as a release:
+
+```sh
+scripts/release.sh 0.2.0 && git push --atomic origin main v0.2.0
+```
+
+Details, signing secrets and deploying a release build: [docs/RELEASE.md](docs/RELEASE.md).
 
 ## Server on the homelab
 
 ```sh
 KAWRUH_SSH_PASS=… deploy/deploy.sh          # cross-compile (aarch64-musl), upload, restart
+KAWRUH_SSH_PASS=… deploy/deploy.sh --release v0.2.0   # install a release build instead
 KAWRUH_SSH_PASS=… deploy/deploy.sh --rollback
 KAWRUH_SSH_PASS=… deploy/admin.sh list-users
 KAWRUH_SSH_PASS=… deploy/admin.sh delete-user <name>   # also removes workspaces they own
@@ -91,7 +103,8 @@ It is compiled out of release builds.
 
 ## Known limits (v1)
 
-- macOS only so far; the code avoids macOS-only APIs, but Windows is untested.
+- Tested on macOS. Windows builds and passes tests in CI but hasn't been tried on a
+  real machine; its title bar keeps the macOS traffic-light gutter.
 - Permissions are per workspace (owner / editor / viewer), not per page.
 - Images by URL only; pasting image files is ignored.
 - The server speaks plain HTTP: use it on your LAN or over Tailscale. Exposing it
