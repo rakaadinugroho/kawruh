@@ -1,0 +1,16 @@
+target/
+node_modules/
+dist/
+.DS_Store
+*.db
+*.db-wal
+*.db-shm
+app/src-tauri/gen/schemas/
+.e2e/
+
+app/public/excalidraw/
+*.local
+crates/kawruh-core/tests/fixtures/out/
+app/.vitest/
+app/tests/e2e/*.png
+app/tsconfig.tsbuildinfo
