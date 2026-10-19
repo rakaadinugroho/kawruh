@@ -9,6 +9,7 @@ use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Channel;
 
+use crate::assets;
 use crate::db::{self, Account, WorkspaceRow};
 use crate::error::{Error, Result};
 use crate::hub::{DocEvent, DocHub, ORIGIN_LOCAL};
@@ -47,7 +48,7 @@ impl AppState {
     }
 
     /// Account of a remote workspace.
-    fn workspace_account(&self, workspace_id: &str) -> Result<Account> {
+    pub(crate) fn workspace_account(&self, workspace_id: &str) -> Result<Account> {
         let ws = db::get_workspace(&self.db(), workspace_id)?
             .ok_or_else(|| Error::msg("workspace not found"))?;
         let id = ws
@@ -171,6 +172,7 @@ pub fn workspace_forget(state: State<'_, AppState>, workspace_id: String) -> Res
 /// Uploads a local workspace to a server under the same id and starts syncing.
 #[tauri::command]
 pub async fn workspace_publish(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     workspace_id: String,
     account_id: String,
@@ -190,6 +192,7 @@ pub async fn workspace_publish(
         &ws.role,
     )?;
     state.sync.start(&workspace_id, &a.server_url, &a.token);
+    tauri::async_runtime::spawn(assets::flush(app, workspace_id.clone()));
     let row = db::get_workspace(&state.db(), &workspace_id)?
         .ok_or_else(|| Error::msg("workspace vanished"))?;
     Ok(state.workspace_info(row))
@@ -559,8 +562,75 @@ pub async fn page_export_file(
         return Ok(None);
     };
     let path = picked.into_path().map_err(|e| Error::msg(e.to_string()))?;
+    let markdown_text = export_assets(&app, &path, &markdown_text).await?;
     std::fs::write(&path, markdown_text).map_err(|e| Error::msg(e.to_string()))?;
     Ok(Some(path.display().to_string()))
+}
+
+/// Copies the page's images into `<name>_assets/` beside the exported file and
+/// points the markdown at them, so the export opens anywhere.
+async fn export_assets(app: &tauri::AppHandle, path: &std::path::Path, md: &str) -> Result<String> {
+    let mut refs = Vec::new();
+    markdown::map_image_srcs(md, |src| {
+        if let Some((ws, name)) = assets::parse_src(src) {
+            refs.push((ws.to_string(), name.to_string()));
+        }
+        None
+    });
+    if refs.is_empty() {
+        return Ok(md.to_string());
+    }
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "page".into());
+    let folder = format!("{stem}_assets");
+    let dir = path.with_file_name(&folder);
+    let mut saved = std::collections::HashSet::new();
+    for (ws, name) in refs {
+        if !saved.insert(name.clone()) {
+            continue;
+        }
+        if let Some((_, bytes)) = assets::load(app, &ws, &name).await? {
+            std::fs::create_dir_all(&dir).map_err(|e| Error::msg(e.to_string()))?;
+            std::fs::write(dir.join(&name), bytes).map_err(|e| Error::msg(e.to_string()))?;
+        }
+    }
+    Ok(markdown::map_image_srcs(md, |src| {
+        assets::parse_src(src)
+            .filter(|(_, name)| saved.contains(*name))
+            .map(|(_, name)| format!("{folder}/{name}"))
+    }))
+}
+
+/// Stores images a markdown file refers to by relative path (an export's
+/// `_assets/` folder, or any image next to it) and points the page at them.
+fn import_assets(state: &AppState, workspace_id: &str, dir: &std::path::Path, md: &str) -> String {
+    relink_local_images(md, dir, |bytes| {
+        let name = assets::put(&state.db(), workspace_id, bytes, "").ok()?;
+        Some(assets::src(workspace_id, &name))
+    })
+}
+
+/// Rewrites relative image paths that point at a readable file under `dir`
+/// with whatever `store` returns for the file's bytes.
+fn relink_local_images(
+    md: &str,
+    dir: &std::path::Path,
+    mut store: impl FnMut(&[u8]) -> Option<String>,
+) -> String {
+    markdown::map_image_srcs(md, |src| {
+        if src.contains("://") || src.starts_with("data:") || src.starts_with('/') {
+            return None;
+        }
+        let rel = percent_encoding::percent_decode_str(src).decode_utf8_lossy();
+        let file = dir.join(rel.as_ref());
+        let meta = std::fs::metadata(&file).ok()?;
+        if !meta.is_file() || meta.len() as usize > assets::MAX_BYTES {
+            return None;
+        }
+        store(&std::fs::read(&file).ok()?)
+    })
 }
 
 /// Imports a markdown file picked in a native open dialog as a sub-page.
@@ -587,7 +657,45 @@ pub async fn page_import_file(
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "Imported".into());
-    page_import_markdown(state, workspace_id, parent, name, text).map(Some)
+    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let text = import_assets(&state, &workspace_id, dir, &text);
+    let page = page_import_markdown(state, workspace_id.clone(), parent, name, text)?;
+    tauri::async_runtime::spawn(assets::flush(app, workspace_id));
+    Ok(Some(page))
+}
+
+// -------------------------------------------------------------- images, links
+
+/// Stores a pasted image. The webview sends the raw bytes as the request body
+/// with `x-kawruh-workspace` and `x-kawruh-mime` headers; returns the `src`.
+#[tauri::command]
+pub fn asset_put(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(Error::msg("expected image bytes"));
+    };
+    let header = |k: &str| {
+        request
+            .headers()
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string()
+    };
+    let workspace_id = header("x-kawruh-workspace");
+    db::get_workspace(&state.db(), &workspace_id)?
+        .ok_or_else(|| Error::msg("workspace not found"))?;
+    let name = assets::put(&state.db(), &workspace_id, bytes, &header("x-kawruh-mime"))?;
+    tauri::async_runtime::spawn(assets::flush(app, workspace_id.clone()));
+    Ok(assets::src(&workspace_id, &name))
+}
+
+#[tauri::command]
+pub async fn link_preview(url: String) -> Result<crate::linkmeta::LinkMeta> {
+    crate::linkmeta::fetch(&url).await
 }
 
 #[tauri::command]
@@ -602,7 +710,24 @@ pub fn setting_set(state: State<'_, AppState>, key: String, value: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::split_title;
+    use super::{relink_local_images, split_title};
+
+    #[test]
+    fn imports_images_next_to_the_markdown_file() {
+        let dir = std::env::temp_dir().join(format!("kawruh-import-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("My page_assets")).unwrap();
+        std::fs::write(dir.join("My page_assets/a.png"), b"png bytes").unwrap();
+        let md = "![a](<My page_assets/a.png>) ![b](missing.png) ![c](https://e.com/c.png)\n";
+        let out = relink_local_images(md, &dir, |bytes| {
+            assert_eq!(bytes, b"png bytes");
+            Some("kawruh-asset://w/x.png".into())
+        });
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            out,
+            "![a](kawruh-asset://w/x.png) ![b](missing.png) ![c](https://e.com/c.png)\n"
+        );
+    }
 
     #[test]
     fn leading_heading_becomes_title() {

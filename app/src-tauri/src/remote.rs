@@ -66,6 +66,19 @@ pub struct ApiToken {
     pub token: Option<String>,
 }
 
+async fn remote_error(res: reqwest::Response) -> Error {
+    let status = res.status();
+    let body: Value = res.json().await.unwrap_or_default();
+    Error::Remote {
+        status: status.as_u16(),
+        code: body["code"].as_str().unwrap_or("http_error").to_string(),
+        message: body["error"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("server returned {status}")),
+    }
+}
+
 pub fn normalize_server(url: &str) -> String {
     let url = url.trim().trim_end_matches('/');
     if url.starts_with("http://") || url.starts_with("https://") {
@@ -108,15 +121,57 @@ impl Remote {
             }
             return Ok(res.json().await?);
         }
-        let body: Value = res.json().await.unwrap_or_default();
-        Err(Error::Remote {
-            status: status.as_u16(),
-            code: body["code"].as_str().unwrap_or("http_error").to_string(),
-            message: body["error"]
-                .as_str()
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("server returned {status}")),
-        })
+        Err(remote_error(res).await)
+    }
+
+    /// Uploads an image asset (`<sha256>.<ext>`) of a workspace.
+    pub async fn put_asset(
+        &self,
+        server: &str,
+        token: &str,
+        ws: &str,
+        name: &str,
+        bytes: Vec<u8>,
+        mime: &str,
+    ) -> Result<()> {
+        let res = self
+            .http
+            .put(format!("{server}/api/workspaces/{ws}/assets/{name}"))
+            .bearer_auth(token)
+            .header(reqwest::header::CONTENT_TYPE, mime)
+            .timeout(std::time::Duration::from_secs(120))
+            .body(bytes)
+            .send()
+            .await?;
+        if res.status().is_success() {
+            Ok(())
+        } else {
+            Err(remote_error(res).await)
+        }
+    }
+
+    /// Downloads an image asset; None if the server doesn't have it.
+    pub async fn get_asset(
+        &self,
+        server: &str,
+        token: &str,
+        ws: &str,
+        name: &str,
+    ) -> Result<Option<Vec<u8>>> {
+        let res = self
+            .http
+            .get(format!("{server}/api/workspaces/{ws}/assets/{name}"))
+            .bearer_auth(token)
+            .timeout(std::time::Duration::from_secs(120))
+            .send()
+            .await?;
+        if res.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !res.status().is_success() {
+            return Err(remote_error(res).await);
+        }
+        Ok(Some(res.bytes().await?.to_vec()))
     }
 
     pub async fn auth(

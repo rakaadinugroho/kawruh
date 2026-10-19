@@ -140,11 +140,17 @@ export function Menu({
   items,
   onClose,
   width = 220,
+  initialActive = -1,
+  instant = false,
 }: {
   at: { x: number; y: number } | null
   items: MenuItem[]
   onClose: () => void
   width?: number
+  /// Item highlighted on open, so Enter picks it.
+  initialActive?: number
+  /// No entrance animation (for menus that open from the keyboard).
+  instant?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState(at)
@@ -175,7 +181,7 @@ export function Menu({
 
   useEffect(() => {
     if (!at) return
-    setActive(-1)
+    setActive(initialActive)
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose()
     }
@@ -212,7 +218,7 @@ export function Menu({
     <div
       ref={ref}
       role="menu"
-      className="kw-menu fixed z-50 rounded-lg bg-raised p-1 shadow-pop"
+      className={`${instant ? '' : 'kw-menu '}fixed z-50 rounded-lg bg-raised p-1 shadow-pop`}
       style={{ left: (pos ?? at).x, top: (pos ?? at).y, width }}
     >
       {items.map((it, i) =>

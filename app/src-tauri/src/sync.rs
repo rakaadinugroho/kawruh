@@ -60,6 +60,13 @@ impl SyncHost for Host {
             .lock()
             .unwrap()
             .insert(self.workspace_id.clone(), status);
+        if matches!(status, SyncStatus::Online) {
+            // Images pasted while offline (or before publishing) go up now.
+            tauri::async_runtime::spawn(crate::assets::flush(
+                self.app.clone(),
+                self.workspace_id.clone(),
+            ));
+        }
         let _ = self.app.emit(
             "sync-status",
             StatusEvent {

@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: blob: https: http:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost; worker-src 'self' blob:"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: blob: https: http: kawruh-asset: http://kawruh-asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost; worker-src 'self' blob:"
     }
   },
   "bundle": {

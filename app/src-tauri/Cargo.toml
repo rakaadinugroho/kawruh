@@ -16,6 +16,11 @@ tauri-build = { version = "2", features = [] }
 kawruh-core = { path = "../../crates/kawruh-core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+sha2.workspace = true
+hex.workspace = true
+regex = "1"
+percent-encoding = "2"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

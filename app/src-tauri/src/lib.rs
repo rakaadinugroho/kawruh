@@ -1,9 +1,11 @@
+mod assets;
 mod commands;
 mod db;
 #[cfg(debug_assertions)]
 mod e2e;
 mod error;
 mod hub;
+mod linkmeta;
 mod remote;
 mod sync;
 
@@ -67,6 +69,14 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .register_asynchronous_uri_scheme_protocol(assets::SCHEME, |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let path = request.uri().path().to_string();
+            tauri::async_runtime::spawn(async move {
+                responder.respond(assets::serve(&app, &path).await);
+            });
+        })
         .setup(|app| {
             let dir = data_dir(app);
             std::fs::create_dir_all(&dir)?;
@@ -128,6 +138,8 @@ pub fn run() {
         commands::page_import_markdown,
         commands::page_export_file,
         commands::page_import_file,
+        commands::asset_put,
+        commands::link_preview,
         commands::setting_get,
         commands::setting_set,
         e2e::e2e_result,
@@ -161,6 +173,8 @@ pub fn run() {
         commands::page_import_markdown,
         commands::page_export_file,
         commands::page_import_file,
+        commands::asset_put,
+        commands::link_preview,
         commands::setting_get,
         commands::setting_set,
     ]);

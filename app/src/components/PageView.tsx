@@ -319,7 +319,12 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
             />
             <div className="mt-4">
               {handle && handle.isReady() ? (
-                <Editor handle={handle} readonly={readonly} onOpenCanvas={setCanvasId} />
+                <Editor
+                  handle={handle}
+                  workspaceId={ws?.id ?? ''}
+                  readonly={readonly}
+                  onOpenCanvas={setCanvasId}
+                />
               ) : (
                 <div className="h-40" />
               )}

@@ -5,6 +5,7 @@ Kawruh is a markdown notebook. Everything you write here is plain markdown under
 - Type `/` on an empty line for blocks: headings, lists, to-dos, tables, code, **Mermaid diagrams** and **canvas drawings**.
 - Select text for the formatting toolbar, or use markdown shortcuts like `**bold**`, `# heading`, `- list`.
 - Drag the ⋮⋮ handle on the left of a block to move it.
+- Paste screenshots and images straight in. Paste a link to keep it as a link, use the page title, or show it as a card or a preview.
 
 ## Organize
 

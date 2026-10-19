@@ -287,6 +287,146 @@ button {
   user-select: none;
 }
 
+/* Pasted images (inline image nodes, served from the asset store). */
+.kw-editor .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  vertical-align: bottom;
+}
+.kw-editor .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Link cards (kawruh_link): a bookmark card, or a preview with the image on top. */
+.kw-link {
+  position: relative;
+  margin: 12px 0;
+}
+.kw-link-card {
+  display: flex;
+  align-items: stretch;
+  min-height: 96px;
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line);
+  overflow: hidden;
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+  transition: box-shadow 120ms;
+}
+/* The card is an <a> inside the editor; undo Crepe's link styling. */
+.milkdown .ProseMirror a.kw-link-card,
+.milkdown .ProseMirror a.kw-link-card:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+.kw-link-card:hover {
+  box-shadow: 0 0 0 1px var(--line), 0 0 0 4px var(--hover);
+}
+.kw-link.ProseMirror-selectednode .kw-link-card {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.kw-link-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+}
+.kw-link-title,
+.kw-link-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.kw-link-title {
+  font: 600 14px/1.35 var(--font-sans);
+}
+.kw-link-desc {
+  font: 13px/1.45 var(--font-sans);
+  color: var(--ink-2);
+}
+.kw-link-site {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 4px;
+  font: 12px/1.3 var(--font-sans);
+  color: var(--ink-3);
+}
+.kw-link-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-sm);
+}
+.kw-link-thumb {
+  width: 176px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-left: 1px solid var(--line);
+}
+.kw-link[data-view='preview'] .kw-link-card {
+  flex-direction: column;
+}
+.kw-link-hero {
+  width: 100%;
+  aspect-ratio: 1.91;
+  object-fit: cover;
+  border-bottom: 1px solid var(--line);
+}
+.kw-link-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms;
+}
+.kw-link:hover .kw-link-tools,
+.kw-link:focus-within .kw-link-tools,
+.kw-link.ProseMirror-selectednode .kw-link-tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+.kw-link-tool {
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  font: 500 12px/1 var(--font-sans);
+  color: var(--ink-2);
+}
+.kw-link-tool:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.kw-link-tool[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.kw-link-tool:active {
+  transform: scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kw-link-card,
+  .kw-link-tools {
+    transition: none;
+  }
+  .kw-link-tool:active {
+    transform: none;
+  }
+}
+
 /* Mermaid previews inside code blocks. */
 .kw-mermaid {
   display: flex;

@@ -23,6 +23,15 @@ export type Account = {
   loggedIn: boolean
 }
 
+/// What a link card shows; fields are absent when the page doesn't say.
+export type LinkMeta = {
+  title?: string
+  description?: string
+  image?: string
+  icon?: string
+  site?: string
+}
+
 export type RemoteWorkspace = { id: string; name: string; role: Role; attached: boolean }
 export type Member = { userId: string; username: string; displayName: string; role: Role }
 export type Share = { token: string; pageId: string; url: string; createdAt?: number | null }
@@ -104,6 +113,13 @@ export const api = {
   /// Native open dialog + import as a sub-page. Returns the new page id.
   importFile: (workspaceId: string, parent: string) =>
     invoke<string | null>('page_import_file', { workspaceId, parent }),
+
+  /// Stores pasted image bytes; returns the `kawruh-asset://` src for the page.
+  assetPut: (workspaceId: string, bytes: Uint8Array, mime: string) =>
+    invoke<string>('asset_put', bytes, {
+      headers: { 'x-kawruh-workspace': workspaceId, 'x-kawruh-mime': mime },
+    }),
+  linkPreview: (url: string) => invoke<LinkMeta>('link_preview', { url }),
 
   settingGet: (key: string) => invoke<string | null>('setting_get', { key }),
   settingSet: (key: string, value: string) => invoke<void>('setting_set', { key, value }),

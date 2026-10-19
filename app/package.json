@@ -20,6 +20,7 @@
     "@milkdown/kit": "^7.22.3",
     "@milkdown/plugin-collab": "^7.22.3",
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-opener": "^2.7.2",
     "lib0": "^0.2.119",
     "lucide-react": "^1.59.0",
     "mermaid": "^12.2.0",
