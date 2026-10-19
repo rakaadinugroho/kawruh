@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# wss:// for the sync client (the desktop app talks to servers behind HTTPS).
+tls = ["tokio-tungstenite/rustls-tls-webpki-roots", "dep:rustls"]
+
 [dependencies]
 yrs.workspace = true
 comrak.workspace = true
@@ -15,6 +19,7 @@ uuid.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
+rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 tracing.workspace = true
 
 [dev-dependencies]

@@ -376,10 +376,21 @@ pub async fn share_create(
     page_id: String,
 ) -> Result<Share> {
     let a = state.workspace_account(&workspace_id)?;
-    state
+    let res = state
         .remote
         .create_share(&a.server_url, &a.token, &workspace_id, &page_id)
-        .await
+        .await;
+    // The server only knows pages that have synced; say so instead of "not found".
+    match res {
+        Err(Error::Remote { status, code, .. }) if code == "page_not_found" => Err(Error::Remote {
+            status,
+            code,
+            message: "This page hasn't reached the server yet. Wait until the workspace shows \
+                      Synced, then try again."
+                .into(),
+        }),
+        other => other,
+    }
 }
 
 #[tauri::command]

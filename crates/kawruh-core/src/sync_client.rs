@@ -103,6 +103,7 @@ async fn run(
 ) {
     let mut subscribed: BTreeSet<String> = BTreeSet::new();
     let mut backoff = Duration::from_millis(500);
+    install_tls_provider();
     loop {
         host.on_status(SyncStatus::Connecting);
         let mut request = match url.as_str().into_client_request() {
@@ -299,5 +300,38 @@ where
                 }
             }
         }
+    }
+}
+
+/// wss:// needs a rustls crypto provider; pick ring explicitly rather than rely
+/// on whichever one other crates happen to enable.
+fn install_tls_provider() {
+    #[cfg(feature = "tls")]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
+#[cfg(all(test, feature = "tls"))]
+mod tests {
+    use tokio_tungstenite::tungstenite::Error;
+    use tokio_tungstenite::tungstenite::error::UrlError;
+
+    /// Public servers sit behind HTTPS, so the client must speak wss://.
+    /// Against a socket that hangs up, a TLS-capable client fails in the
+    /// handshake, not with "TLS support not compiled in".
+    #[tokio::test]
+    async fn wss_urls_are_supported() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+        super::install_tls_provider();
+        let err = tokio_tungstenite::connect_async(format!("wss://localhost:{port}/"))
+            .await
+            .unwrap_err();
+        assert!(
+            !matches!(err, Error::Url(UrlError::TlsFeatureNotEnabled)),
+            "{err:?}"
+        );
     }
 }
