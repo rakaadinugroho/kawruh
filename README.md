@@ -26,6 +26,23 @@ The builds aren't signed by Apple or Microsoft yet, so the first launch takes on
 extra click: on macOS, System Settings → Privacy & Security → **Open Anyway**; on
 Windows, **More info → Run anyway**.
 
+## Use it with AI agents (MCP)
+
+Every Kawruh server has an MCP endpoint at `/mcp`, so Claude Code, Claude
+Desktop, Cursor, VS Code and other agents can read, search and edit your pages.
+Their edits show up live for everyone with the page open.
+
+1. In the app, open **Settings → API tokens → New token** and copy the `kwr_…` token.
+2. Connect your agent, for example Claude Code:
+   ```sh
+   claude mcp add --transport http kawruh https://<your-server>/mcp \
+     --header "Authorization: Bearer kwr_..."
+   ```
+3. Ask it something like *"List my Kawruh workspaces"* or *"Summarise the pages under Projects"*.
+
+Agents see only workspaces published to the server. Setup for the other clients,
+the full tool list, and tips are in [docs/MCP.md](docs/MCP.md).
+
 ## How it fits together
 
 ```

@@ -1,41 +1,152 @@
-# Connecting AI agents to Kawruh (MCP)
+# Use Kawruh with AI agents (MCP)
 
-The Kawruh server exposes an MCP endpoint at `http://<host>:7420/mcp`
-(streamable HTTP). Agents act as you: they see the workspaces you are a member
-of, and their edits land in the live documents, so anyone with the page open
-sees the change immediately.
+Every Kawruh server has an [MCP](https://modelcontextprotocol.io) endpoint at
+`/mcp` (streamable HTTP). Connect an agent such as Claude Code, Claude Desktop,
+Cursor or VS Code to it, and the agent can list, read, search, write and
+organise your pages.
 
-## 1. Create a personal access token
+The agent acts as you. It sees the workspaces you are a member of, with your
+role in each. Its edits land in the live documents, so anyone with the page
+open sees them as they happen.
 
-**In the app:** Settings → API tokens → *New token*. Copy the `kwr_…` value; it
-is shown once.
+The examples below use `https://kawruh.example.com`. Replace it with your
+server's address.
 
-**With curl** (using your username and password):
+## Before you start
+
+- **A Kawruh server you can reach.** Use `https://…` for a server behind HTTPS
+  (for example a Cloudflare Tunnel), or `http://<host>:7420` on your own network.
+- **An account on that server.** Create it in the app: Settings → Accounts.
+- **Published workspaces.** Agents only see workspaces on the server. A workspace
+  that lives only on your computer ("On this Mac only") is invisible to them
+  until you publish it with **Share → Publish**.
+
+## 1. Create a token
+
+In the app, go to **Settings → API tokens → New token**. Copy the `kwr_…` value
+right away; it is shown only once. The app also shows a ready-to-paste Claude
+Code command.
+
+Make one token per agent or computer, so you can revoke each one on its own.
+
+<details>
+<summary>Without the app (curl)</summary>
 
 ```sh
-SERVER=http://<host>:7420
+SERVER=https://kawruh.example.com
 SESSION=$(curl -s $SERVER/api/auth/login -H 'Content-Type: application/json' \
   -d '{"username":"you","password":"your-password"}' | jq -r .token)
 curl -s $SERVER/api/tokens -H "Authorization: Bearer $SESSION" \
   -H 'Content-Type: application/json' -d '{"name":"claude-code"}' | jq -r .token
 ```
 
-Revoke a token with `DELETE /api/tokens/<id>` (ids from `GET /api/tokens`) or in
-the app.
+</details>
 
-## 2. Add the server to Claude Code
+## 2. Connect your agent
+
+All clients connect the same way: they send the token as an
+`Authorization: Bearer kwr_…` header to `<server>/mcp`.
+
+### Claude Code
 
 ```sh
-claude mcp add --transport http kawruh http://<host>:7420/mcp \
+claude mcp add --transport http kawruh https://kawruh.example.com/mcp \
   --header "Authorization: Bearer kwr_..."
 ```
 
-Check it with `claude mcp list`, or `/mcp` inside a session. Any MCP client that
-supports streamable HTTP with a custom `Authorization` header works the same way.
+Add `--scope user` to use it in every project, not just the current one.
 
-Off your LAN, reach the server through Tailscale (the homelab is on your
-tailnet) and use its Tailscale address instead of its LAN address. Traffic is
-plain HTTP, so don't expose port 7420 to the internet directly.
+### Claude Desktop
+
+Claude Desktop reaches remote servers with a custom header through
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which needs Node.js.
+Open **Settings → Developer → Edit Config** (`claude_desktop_config.json`), add
+the following, and restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "kawruh": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://kawruh.example.com/mcp",
+        "--header",
+        "Authorization:${KAWRUH_AUTH}"
+      ],
+      "env": { "KAWRUH_AUTH": "Bearer kwr_..." }
+    }
+  }
+}
+```
+
+Keep `Authorization:${KAWRUH_AUTH}` without spaces. Some clients mangle spaces
+inside `args`, and spaces inside `env` are fine.
+
+### Cursor
+
+Add this to `~/.cursor/mcp.json` (for all projects) or `.cursor/mcp.json` (for
+one project):
+
+```json
+{
+  "mcpServers": {
+    "kawruh": {
+      "url": "https://kawruh.example.com/mcp",
+      "headers": { "Authorization": "Bearer ${env:KAWRUH_TOKEN}" }
+    }
+  }
+}
+```
+
+Then set `KAWRUH_TOKEN=kwr_...` in the environment Cursor starts from, or put
+the token in the header directly.
+
+### VS Code (Copilot agent mode)
+
+Add this to `.vscode/mcp.json`. VS Code asks for the token the first time and
+stores it securely:
+
+```json
+{
+  "inputs": [
+    { "type": "promptString", "id": "kawruh-token", "description": "Kawruh token (kwr_…)", "password": true }
+  ],
+  "servers": {
+    "kawruh": {
+      "type": "http",
+      "url": "https://kawruh.example.com/mcp",
+      "headers": { "Authorization": "Bearer ${input:kawruh-token}" }
+    }
+  }
+}
+```
+
+### Other clients
+
+Any MCP client that supports streamable HTTP with a custom header works the same
+way: use the URL `<server>/mcp` and the header `Authorization: Bearer kwr_…`.
+
+## 3. Check it works
+
+- **Claude Code:** `claude mcp list` should show `kawruh` as connected. Inside a
+  session, `/mcp` lists its tools.
+- **Any client:** ask *"List my Kawruh workspaces."* The agent should name them
+  and your role in each.
+
+## How agents work with your pages
+
+You don't need to know any ids; ask in plain language. Behind the scenes an
+agent usually:
+
+1. calls `list_workspaces` to find the workspace,
+2. calls `list_pages` to get the page tree with ids, or `search_pages` to find
+   pages by content,
+3. calls `read_page` to read a page as markdown,
+4. calls `create_page`, `update_page`, `rename_page`, `move_page` or
+   `delete_page` to make changes.
+
+Pages an agent deletes go to the Trash, and you can restore them in the app.
 
 ## Tools
 
@@ -53,22 +164,52 @@ plain HTTP, so don't expose port 7420 to the internet directly.
 
 Write tools need the **editor** or **owner** role; viewers get a read-only error.
 
-Page bodies are GitHub-flavoured markdown. Titles are not part of the body: use
+## Writing pages
+
+Page bodies are GitHub-flavoured markdown. Titles are not part of the body; use
 `rename_page` to change them. A few conventions:
 
-- Diagrams: ` ```mermaid ` fenced blocks render as Mermaid in the app and on share pages.
-- Drawings: ` ```kawruh-canvas ` blocks hold a canvas id; leave them in place when
-  rewriting a page or the drawing is detached from the page.
-- Link cards: a paragraph that is only `[Title](https://… "kawruh:card")` shows as a
-  bookmark card (`"kawruh:preview"` for a large preview). Elsewhere it reads as a
-  normal link, so it's safe to write.
-- Images pasted in the app appear as `![](kawruh-asset://<workspace>/<sha256>.png)`.
-  Keep those refs when rewriting a page; agents can't upload new images yet, but
-  ordinary `https://` image URLs work.
-- `search_pages` reads an index refreshed about two seconds after each edit.
+- **Diagrams:** ` ```mermaid ` fenced blocks render as Mermaid in the app and on
+  share pages.
+- **Drawings:** ` ```kawruh-canvas ` blocks hold a canvas id. Leave them in place
+  when rewriting a page, or the drawing is detached from the page.
+- **Link cards:** a paragraph that is only `[Title](https://… "kawruh:card")`
+  shows as a bookmark card (`"kawruh:preview"` for a large preview). Elsewhere it
+  reads as a normal link, so it's safe to write.
+- **Images:** images pasted in the app appear as
+  `![](kawruh-asset://<workspace>/<sha256>.png)`. Keep those refs when rewriting
+  a page. Agents can't upload new images yet, but ordinary `https://` image URLs
+  work.
+- **Search** reads an index refreshed about two seconds after each edit.
 
 ## Example prompts
 
 - "List my Kawruh workspaces and summarise the pages under *Projects*."
-- "Create a page *Release checklist* under *Projects* with a task list for v1."
-- "Append a Mermaid sequence diagram of the login flow to the *Auth* page."
+- "Search my notes for *pricing* and give me the three main decisions."
+- "Read *Roadmap* and append a *Risks* section with what you think could slip."
+- "Create meeting notes under *Meetings* from this transcript, with action items
+  as a checklist."
+- "Turn this repository's README into a page under *Docs*."
+- "Add a Mermaid sequence diagram of the login flow to the *Auth* page."
+- "Move every page with *draft* in its title under *Archive*."
+
+## Access and safety
+
+- **A token can do whatever your account can.** In workspaces where you are a
+  viewer, the agent can only read.
+- **For a read-only agent,** create a separate account, invite it to the
+  workspace as a **viewer**, and make the token on that account.
+- **Revoke** a token in Settings → API tokens (or `DELETE /api/tokens/<id>`). It
+  stops working immediately. The server only stores a hash of each token.
+- **Use HTTPS** whenever the server is reached over the internet. Plain HTTP is
+  only for a network you trust.
+
+## Troubleshooting
+
+| What you see | Likely cause |
+|---|---|
+| `401 unauthorized` | The token was mistyped or revoked, or the header isn't exactly `Authorization: Bearer kwr_…`. |
+| "read-only" error on writes | You're a viewer in that workspace. |
+| The agent can't find a workspace or page | The workspace isn't published to this server, or recent edits haven't synced yet. Wait for **Synced** in the app's sidebar. |
+| A brand-new page doesn't show up in search | The search index catches up about two seconds after an edit. |
+| Connection or TLS errors | Check the address: `https://` for a server behind HTTPS, `http://…:7420` on your own network. |
