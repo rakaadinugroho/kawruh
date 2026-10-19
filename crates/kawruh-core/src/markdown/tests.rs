@@ -138,6 +138,48 @@ fn canvas_and_mermaid_are_lossless() {
 }
 
 #[test]
+fn link_cards_parse_and_serialize() {
+    use crate::schema::node;
+    let md = "[Example](https://example.com \"kawruh:card\")\n\n[Big](https://example.com/x \"kawruh:preview\")\n";
+    let p = markdown_to_pnode(md);
+    let card = &p.children()[0];
+    assert_eq!(card.name(), node::LINK_CARD);
+    assert_eq!(card.attr_str("href"), "https://example.com");
+    assert_eq!(card.attr_str("label"), "Example");
+    assert_eq!(card.attr_str("view"), "card");
+    assert_eq!(p.children()[1].attr_str("view"), "preview");
+    contract::load().validate(&p).unwrap();
+    assert_eq!(doc_to_markdown(&doc_from_md(md)), md);
+}
+
+#[test]
+fn only_a_lone_marked_link_is_a_card() {
+    use crate::schema::node;
+    for md in [
+        "[x](https://e.com \"kawruh:other\")",
+        "[x](https://e.com \"Docs\")",
+        "see [x](https://e.com \"kawruh:card\")",
+        "<https://e.com>",
+    ] {
+        let p = markdown_to_pnode(md);
+        assert_eq!(p.children()[0].name(), node::PARAGRAPH, "{md}");
+    }
+}
+
+#[test]
+fn image_srcs_can_be_rewritten() {
+    let md = "Look ![a](kawruh-asset://w/1.png) and ![b](https://e.com/b.png)\n";
+    let out = crate::markdown::map_image_srcs(md, |src| {
+        src.strip_prefix("kawruh-asset://w/")
+            .map(|name| format!("Page files/{name}"))
+    });
+    assert_eq!(
+        out,
+        "Look ![a](<Page files/1.png>) and ![b](https://e.com/b.png)\n"
+    );
+}
+
+#[test]
 fn html_is_escaped_in_share_rendering() {
     let html = markdown_to_html("hi <script>alert(1)</script>");
     assert!(!html.contains("<script>"), "{html}");

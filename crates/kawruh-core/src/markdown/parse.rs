@@ -4,7 +4,9 @@ use comrak::nodes::{ListType, NodeValue, TableAlignment};
 use comrak::{Arena, Options, parse_document};
 use yrs::Any;
 
-use crate::schema::{Attrs, CANVAS_LANG, PMark, PNode, attrs, int, mark, node, s};
+use crate::schema::{
+    Attrs, CANVAS_LANG, LINK_CARD_PREFIX, LINK_CARD_VIEWS, PMark, PNode, attrs, int, mark, node, s,
+};
 
 pub fn options() -> Options<'static> {
     let mut o = Options::default();
@@ -39,7 +41,7 @@ fn paragraph(children: Vec<PNode>) -> PNode {
 fn block(n: AstNode<'_>) -> Vec<PNode> {
     let value = n.data().value.clone();
     match value {
-        NodeValue::Paragraph => vec![paragraph(inlines(n))],
+        NodeValue::Paragraph => vec![link_card(n).unwrap_or_else(|| paragraph(inlines(n)))],
         NodeValue::Heading(h) => vec![PNode::element(
             node::HEADING,
             attrs([("id", s("")), ("level", int(h.level as i64))]),
@@ -113,6 +115,32 @@ fn plain(text: String) -> PNode {
         text,
         marks: Vec::new(),
     }
+}
+
+/// A paragraph holding only `[label](href "kawruh:card")` (or `"kawruh:preview"`)
+/// is a link card; anywhere else that markdown is an ordinary link.
+fn link_card(n: AstNode<'_>) -> Option<PNode> {
+    let mut children = n.children();
+    let link = children.next()?;
+    if children.next().is_some() {
+        return None;
+    }
+    let NodeValue::Link(l) = link.data().value.clone() else {
+        return None;
+    };
+    let view = l.title.strip_prefix(LINK_CARD_PREFIX)?;
+    if !LINK_CARD_VIEWS.contains(&view) {
+        return None;
+    }
+    Some(PNode::element(
+        node::LINK_CARD,
+        attrs([
+            ("href", s(&l.url)),
+            ("label", s(&collect_text(link))),
+            ("view", s(view)),
+        ]),
+        Vec::new(),
+    ))
 }
 
 fn non_empty(mut blocks: Vec<PNode>) -> Vec<PNode> {

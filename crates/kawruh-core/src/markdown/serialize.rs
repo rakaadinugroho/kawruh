@@ -1,6 +1,6 @@
 //! `PNode` → markdown (GFM), close to what Milkdown's remark-stringify emits.
 
-use crate::schema::{CANVAS_LANG, PMark, PNode, mark, node};
+use crate::schema::{CANVAS_LANG, LINK_CARD_PREFIX, LINK_CARD_VIEWS, PMark, PNode, mark, node};
 
 pub fn pnode_to_markdown(doc: &PNode) -> String {
     let mut out = blocks(doc.children(), true);
@@ -79,6 +79,17 @@ fn block(n: &PNode) -> String {
             format!("{fence}{}\n{content}\n{fence}", n.attr_str("language"))
         }
         node::CANVAS => format!("```{CANVAS_LANG}\n{}\n```", n.attr_str("id")),
+        node::LINK_CARD => {
+            let view = n.attr_str("view");
+            let view = if LINK_CARD_VIEWS.contains(&view) {
+                view
+            } else {
+                "card"
+            };
+            let label = escape_text(&n.attr_str("label").replace('\n', " "), false, &mut false);
+            let href = link_dest(n.attr_str("href"));
+            format!("[{label}]({href} \"{LINK_CARD_PREFIX}{view}\")")
+        }
         node::HR => "---".to_string(),
         node::BULLET_LIST | node::ORDERED_LIST => list(n, false),
         node::TABLE => table(n),

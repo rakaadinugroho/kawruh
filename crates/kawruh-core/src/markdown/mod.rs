@@ -38,6 +38,35 @@ pub fn append_markdown(doc: &Doc, md: &str, origin: &str) {
     ydoc::append_fragment(&mut txn, &frag, &pnode);
 }
 
+/// Rewrites image sources in markdown: `f` returns the new `src`, or `None` to
+/// keep it. Used to swap asset refs for files beside an exported page and back.
+pub fn map_image_srcs(md: &str, mut f: impl FnMut(&str) -> Option<String>) -> String {
+    fn walk(n: &mut crate::schema::PNode, f: &mut dyn FnMut(&str) -> Option<String>) {
+        if let crate::schema::PNode::Element {
+            name,
+            attrs,
+            children,
+        } = n
+        {
+            if name == crate::schema::node::IMAGE {
+                let src = match attrs.get("src") {
+                    Some(yrs::Any::String(s)) => s.to_string(),
+                    _ => String::new(),
+                };
+                if let Some(next) = f(&src) {
+                    attrs.insert("src".into(), crate::schema::s(&next));
+                }
+            }
+            for c in children {
+                walk(c, f);
+            }
+        }
+    }
+    let mut doc = markdown_to_pnode(md);
+    walk(&mut doc, &mut f);
+    pnode_to_markdown(&doc)
+}
+
 /// Renders markdown to sanitized HTML (raw HTML is escaped).
 pub fn markdown_to_html(md: &str) -> String {
     let mut o = parse::options();

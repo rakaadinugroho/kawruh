@@ -11,6 +11,9 @@ use yrs::Any;
 
 pub const FRAGMENT: &str = "prosemirror";
 pub const CANVAS_LANG: &str = "kawruh-canvas";
+/// Link title that marks `[label](href "kawruh:card")` as a link card.
+pub const LINK_CARD_PREFIX: &str = "kawruh:";
+pub const LINK_CARD_VIEWS: [&str; 2] = ["card", "preview"];
 
 pub mod node {
     pub const DOC: &str = "doc";
@@ -33,6 +36,7 @@ pub mod node {
     pub const FOOTNOTE_DEFINITION: &str = "footnote_definition";
     pub const FOOTNOTE_REFERENCE: &str = "footnote_reference";
     pub const CANVAS: &str = "kawruh_canvas";
+    pub const LINK_CARD: &str = "kawruh_link";
 }
 
 pub mod mark {
@@ -161,6 +165,7 @@ pub fn default_attrs(name: &str) -> Attrs {
         ]),
         FOOTNOTE_DEFINITION | FOOTNOTE_REFERENCE => attrs([("label", s(""))]),
         CANVAS => attrs([("id", s(""))]),
+        LINK_CARD => attrs([("href", s("")), ("label", s("")), ("view", s("card"))]),
         mark::EMPHASIS | mark::STRONG => attrs([("marker", s("*"))]),
         _ => Attrs::new(),
     }

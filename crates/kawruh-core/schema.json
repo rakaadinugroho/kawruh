@@ -332,6 +332,31 @@
           "validate": "string"
         }
       }
+    },
+    "kawruh_link": {
+      "group": "block",
+      "content": null,
+      "marks": "",
+      "inline": false,
+      "atom": true,
+      "code": false,
+      "attrs": {
+        "href": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        },
+        "label": {
+          "required": false,
+          "default": "",
+          "validate": "string"
+        },
+        "view": {
+          "required": false,
+          "default": "card",
+          "validate": "string"
+        }
+      }
     }
   },
   "marks": {
