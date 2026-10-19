@@ -127,3 +127,7 @@ It is compiled out of release builds.
 - The server speaks plain HTTP: use it on your LAN or over Tailscale. Exposing it
   publicly needs HTTPS in front (e.g. a Cloudflare tunnel).
 - Server tokens are stored unencrypted in the app's local database.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
