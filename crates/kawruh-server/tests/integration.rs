@@ -9,12 +9,13 @@ use kawruh_core::sync_client::{self, SyncHandle, SyncHost, SyncStatus};
 use kawruh_core::yrs::sync::awareness::{AwarenessUpdate, AwarenessUpdateEntry};
 use kawruh_core::yrs::updates::decoder::Decode;
 use kawruh_core::yrs::updates::encoder::Encode;
-use kawruh_core::yrs::{ClientID, Doc, GetString, ReadTxn, Text, Transact};
+use kawruh_core::yrs::{ClientID, Doc, GetString, Map, ReadTxn, Text, Transact};
 use serde_json::{Value, json};
+use sha2::Digest;
 
 struct Server {
     base: String,
-    _dir: Arc<tempfile::TempDir>,
+    dir: Arc<tempfile::TempDir>,
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
@@ -23,19 +24,28 @@ async fn start() -> Server {
 }
 
 async fn start_in(dir: Arc<tempfile::TempDir>) -> Server {
+    start_with(dir, |_| {}).await
+}
+
+async fn start_with(
+    dir: Arc<tempfile::TempDir>,
+    configure: impl FnOnce(&mut kawruh_server::Config),
+) -> Server {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let cfg = kawruh_server::Config {
+    let mut cfg = kawruh_server::Config {
         bind: addr,
         data_dir: dir.path().to_path_buf(),
         public_url: format!("http://{addr}"),
         allow_signup: true,
         min_free_mb: 0,
+        max_asset_mb: 10,
     };
+    configure(&mut cfg);
     let task = tokio::spawn(kawruh_server::serve(listener, cfg));
     Server {
         base: format!("http://{addr}"),
-        _dir: dir,
+        dir,
         task,
     }
 }
@@ -942,4 +952,416 @@ async fn demoting_a_connected_editor_takes_effect_without_reconnect() {
     .await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(a.text("page-1"), "editor ");
+}
+
+// ---- assets -------------------------------------------------------------------
+
+fn asset_name(bytes: &[u8], ext: &str) -> String {
+    format!("{}.{ext}", hex::encode(sha2::Sha256::digest(bytes)))
+}
+
+async fn put_asset(s: &Server, token: &str, ws: &str, name: &str, body: Vec<u8>) -> (u16, Value) {
+    let res = http()
+        .put(format!("{}/api/workspaces/{ws}/assets/{name}", s.base))
+        .bearer_auth(token)
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    let status = res.status().as_u16();
+    (status, res.json().await.unwrap_or(Value::Null))
+}
+
+fn header<'a>(res: &'a reqwest::Response, name: &str) -> &'a str {
+    res.headers()
+        .get(name)
+        .map(|v| v.to_str().unwrap())
+        .unwrap_or("")
+}
+
+async fn add_member(s: &Server, owner: &str, ws: &str, username: &str, role: &str) {
+    let (status, body) = post(
+        s,
+        owner,
+        &format!("/api/workspaces/{ws}/members"),
+        json!({"username": username, "role": role}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+}
+
+#[tokio::test]
+async fn assets_round_trip_with_permissions() {
+    let s = start().await;
+    let (alice, _) = register(&s, "alice").await;
+    let (bob, _) = register(&s, "bob").await;
+    let (carol, _) = register(&s, "carol").await;
+    let (mallory, _) = register(&s, "mallory").await;
+    let ws = create_workspace(&s, &alice, "Pictures").await;
+    add_member(&s, &alice, &ws, "bob", "viewer").await;
+    add_member(&s, &alice, &ws, "carol", "editor").await;
+
+    // Larger than axum's default 2 MB body limit, below KAWRUH_MAX_ASSET_MB.
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.resize(3 * 1024 * 1024, 7);
+    let name = asset_name(&png, "png");
+    let (status, body) = put_asset(&s, &alice, &ws, &name, png.clone()).await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!(body, json!({"name": name, "size": png.len()}));
+    // Uploading the same content again is idempotent (an editor this time).
+    let (status, body) = put_asset(&s, &carol, &ws, &name, png.clone()).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, json!({"name": name, "size": png.len()}));
+    // Personal access tokens work too.
+    let (_, pat) = post(&s, &alice, "/api/tokens", json!({"name": "app"})).await;
+    let pat = pat["token"].as_str().unwrap().to_string();
+    let jpg = b"\xff\xd8\xff not really a jpeg".to_vec();
+    let jpg_name = asset_name(&jpg, "jpg");
+    assert_eq!(
+        put_asset(&s, &pat, &ws, &jpg_name, jpg.clone()).await.0,
+        201
+    );
+
+    // Any member can download, with immutable caching and nosniff.
+    let url = |n: &str| format!("{}/api/workspaces/{ws}/assets/{n}", s.base);
+    let res = http()
+        .get(url(&name))
+        .bearer_auth(&bob)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 200);
+    assert_eq!(header(&res, "content-type"), "image/png");
+    assert_eq!(
+        header(&res, "cache-control"),
+        "private, max-age=31536000, immutable"
+    );
+    assert_eq!(header(&res, "x-content-type-options"), "nosniff");
+    assert_eq!(res.bytes().await.unwrap().as_ref(), png.as_slice());
+    let res = http()
+        .get(url(&jpg_name))
+        .bearer_auth(&pat)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(header(&res, "content-type"), "image/jpeg");
+    assert_eq!(res.bytes().await.unwrap().as_ref(), jpg.as_slice());
+
+    // Stored under <data>/assets/<ws>/, with no temp files left behind.
+    let dir = s.dir.path().join("assets").join(&ws);
+    let mut files: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    files.sort();
+    let mut expected = vec![name.clone(), jpg_name.clone()];
+    expected.sort();
+    assert_eq!(files, expected);
+
+    // Content that does not match the hash in the name.
+    let wrong = asset_name(b"something else", "png");
+    let (status, body) = put_asset(&s, &alice, &ws, &wrong, b"tampered".to_vec()).await;
+    assert_eq!((status, body["code"].as_str()), (400, Some("bad_hash")));
+    assert!(!dir.join(&wrong).exists());
+
+    // Malformed names.
+    for bad in [
+        "foo.png".to_string(),
+        format!("{}.svg", &name[..64]),
+        format!("{}.png", name[..64].to_uppercase()),
+        format!("{}.png.png", &name[..64]),
+    ] {
+        let (status, body) = put_asset(&s, &alice, &ws, &bad, png.clone()).await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (400, Some("bad_name")),
+            "{bad}"
+        );
+        let (status, body) = get(
+            &s,
+            Some(&alice),
+            &format!("/api/workspaces/{ws}/assets/{bad}"),
+        )
+        .await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (400, Some("bad_name")),
+            "{bad}"
+        );
+    }
+    let missing = asset_name(b"never uploaded", "webp");
+    let (status, body) = get(
+        &s,
+        Some(&bob),
+        &format!("/api/workspaces/{ws}/assets/{missing}"),
+    )
+    .await;
+    assert_eq!((status, body["code"].as_str()), (404, Some("not_found")));
+
+    // Viewers cannot upload; non-members can do neither.
+    // (Refused uploads still get a readable error for a multi-MB body.)
+    let small = b"GIF89a".to_vec();
+    let small_name = asset_name(&small, "gif");
+    let (status, body) = put_asset(&s, &bob, &ws, &name, png.clone()).await;
+    assert_eq!((status, body["code"].as_str()), (403, Some("forbidden")));
+    let (status, body) = put_asset(&s, "not-a-token", &ws, &name, png.clone()).await;
+    assert_eq!((status, body["code"].as_str()), (401, Some("unauthorized")));
+    let (status, body) = put_asset(&s, &mallory, &ws, &small_name, small.clone()).await;
+    assert_eq!((status, body["code"].as_str()), (403, Some("forbidden")));
+    let (status, body) = get(
+        &s,
+        Some(&mallory),
+        &format!("/api/workspaces/{ws}/assets/{name}"),
+    )
+    .await;
+    assert_eq!((status, body["code"].as_str()), (403, Some("forbidden")));
+    let (status, _) = get(&s, None, &format!("/api/workspaces/{ws}/assets/{name}")).await;
+    assert_eq!(status, 401);
+    let (status, body) = put_asset(&s, &alice, "no-such-ws", &small_name, small.clone()).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (404, Some("workspace_not_found"))
+    );
+    assert!(!dir.join(&small_name).exists());
+
+    // Deleting the workspace removes its assets.
+    let res = http()
+        .delete(format!("{}/api/workspaces/{ws}", s.base))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 204);
+    assert!(!dir.exists());
+}
+
+/// Sends only the request head (no body) and returns the raw response, so an
+/// early 413 can be read without the client racing a connection reset.
+async fn raw_put_head(s: &Server, token: &str, path: &str, content_length: u64) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let addr = s.base.trim_start_matches("http://");
+    let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let head = format!(
+        "PUT {path} HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {token}\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\n"
+    );
+    sock.write_all(head.as_bytes()).await.unwrap();
+    let mut buf = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), sock.read_to_end(&mut buf))
+        .await
+        .expect("no response to request head")
+        .unwrap();
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+#[tokio::test]
+async fn asset_uploads_respect_size_and_disk_limits() {
+    let s = start_with(Arc::new(tempfile::tempdir().unwrap()), |c| {
+        c.max_asset_mb = 1
+    })
+    .await;
+    let (alice, _) = register(&s, "alice").await;
+    let ws = create_workspace(&s, &alice, "Limits").await;
+
+    let exact = vec![1u8; 1024 * 1024];
+    let (status, body) = put_asset(&s, &alice, &ws, &asset_name(&exact, "gif"), exact).await;
+    assert_eq!(status, 201, "{body}");
+
+    let over = vec![1u8; 1024 * 1024 + 1];
+    let path = format!("/api/workspaces/{ws}/assets/{}", asset_name(&over, "gif"));
+    let res = raw_put_head(&s, &alice, &path, over.len() as u64).await;
+    assert!(res.starts_with("HTTP/1.1 413"), "{res}");
+    assert!(res.contains("\"code\":\"too_large\""), "{res}");
+
+    // Below KAWRUH_MIN_FREE_MB, uploads get the low-disk refusal.
+    let low = start_with(Arc::new(tempfile::tempdir().unwrap()), |c| {
+        c.min_free_mb = 1 << 40
+    })
+    .await;
+    let (alice, _) = register(&low, "alice").await;
+    let ws = create_workspace(&low, &alice, "Full").await;
+    let png = b"png".to_vec();
+    let (status, body) = put_asset(&low, &alice, &ws, &asset_name(&png, "png"), png).await;
+    assert_eq!((status, body["code"].as_str()), (507, Some("disk_full")));
+}
+
+#[tokio::test]
+async fn share_pages_serve_assets_and_link_cards() {
+    let s = start().await;
+    let (alice, _) = register(&s, "alice").await;
+    let ws = create_workspace(&s, &alice, "Blog").await;
+    let elsewhere = create_workspace(&s, &alice, "Elsewhere").await;
+    let img = b"GIF89a shared".to_vec();
+    let img_name = asset_name(&img, "gif");
+    assert_eq!(
+        put_asset(&s, &alice, &ws, &img_name, img.clone()).await.0,
+        201
+    );
+    let foreign = b"RIFF webp elsewhere".to_vec();
+    let foreign_name = asset_name(&foreign, "webp");
+    assert_eq!(
+        put_asset(&s, &alice, &elsewhere, &foreign_name, foreign)
+            .await
+            .0,
+        201
+    );
+
+    let markdown = format!(
+        "Intro.\n\n![diagram](kawruh-asset://{ws}/{img_name})\n\n![foreign](kawruh-asset://{elsewhere}/{foreign_name})\n\n[Example Domain](https://example.com \"kawruh:card\")\n\n[Big Post](https://blog.example/post \"kawruh:preview\")\n\n[Evil link](javascript:alert(3) \"kawruh:card\")\n"
+    );
+    let (_, pat) = post(&s, &alice, "/api/tokens", json!({"name": "t"})).await;
+    let mut mcp = Mcp::connect(&s, pat["token"].as_str().unwrap()).await;
+    let (text, err) = mcp
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Post", "markdown": markdown}),
+        )
+        .await;
+    assert!(!err, "{text}");
+    let page = extract_id(&text);
+    let (status, share) = post(
+        &s,
+        &alice,
+        &format!("/api/workspaces/{ws}/shares"),
+        json!({"page_id": page}),
+    )
+    .await;
+    assert_eq!(status, 200, "{share}");
+    let token = share["token"].as_str().unwrap().to_string();
+    let url = share["url"].as_str().unwrap().to_string();
+
+    let res = http().get(&url).send().await.unwrap();
+    let csp = header(&res, "content-security-policy").to_string();
+    assert!(
+        csp.contains("default-src 'none'") && csp.contains("img-src 'self' data: https: http:"),
+        "{csp}"
+    );
+    let html = res.text().await.unwrap();
+    // Images of this workspace point at the share's asset route; others stay as-is.
+    assert!(
+        html.contains(&format!(
+            "<img src=\"/s/{token}/assets/{img_name}\" alt=\"diagram\""
+        )),
+        "{html}"
+    );
+    assert!(html.contains(&format!(
+        "src=\"kawruh-asset://{elsewhere}/{foreign_name}\""
+    )));
+    // Cards without metadata: title + domain.
+    assert!(html.contains(
+        "<a class=\"link-card\" href=\"https://example.com\" rel=\"noopener noreferrer nofollow\">"
+    ));
+    assert!(html.contains("<span class=\"lc-title\">Example Domain</span>"));
+    assert!(html.contains("<span>example.com</span>"));
+    assert!(
+        html.contains(
+            "<a class=\"link-card link-card-preview\" href=\"https://blog.example/post\""
+        )
+    );
+    // A javascript: card is not a link at all.
+    assert!(html.contains("<p>Evil link</p>"), "{html}");
+    assert!(!html.contains("javascript:"));
+
+    // The share's asset route serves only the shared workspace's assets.
+    let res = http()
+        .get(format!("{url}/assets/{img_name}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 200);
+    assert_eq!(header(&res, "content-type"), "image/gif");
+    assert_eq!(
+        header(&res, "cache-control"),
+        "public, max-age=31536000, immutable"
+    );
+    assert_eq!(header(&res, "x-content-type-options"), "nosniff");
+    assert_eq!(res.bytes().await.unwrap().as_ref(), img.as_slice());
+    for path in [
+        format!("{url}/assets/{foreign_name}"),
+        format!("{url}/assets/{}", asset_name(b"missing", "png")),
+        format!("{url}/assets/not-a-hash.png"),
+        format!("{}/s/doesnotexist/assets/{img_name}", s.base),
+    ] {
+        let status = http().get(&path).send().await.unwrap().status().as_u16();
+        assert_eq!(status, 404, "{path}");
+    }
+
+    // Seed link metadata in the page doc's `link_meta` map, as the app does.
+    let c = Client::connect(&s, &alice, &ws);
+    wait_until("client online", || c.online()).await;
+    c.handle.subscribe(&page);
+    wait_until("page synced", || {
+        kawruh_core::markdown::doc_to_markdown(&c.doc(&page)).contains("Example Domain")
+    })
+    .await;
+    let doc = c.doc(&page);
+    let sv = doc.transact().state_vector();
+    let link_meta = doc.get_or_insert_map("link_meta");
+    {
+        let mut txn = doc.transact_mut();
+        link_meta.insert(
+            &mut txn,
+            "https://example.com",
+            json!({
+                "title": "Example <script>alert(1)</script>",
+                "description": "An \"example\" & more",
+                "image": "https://example.com/og.png",
+                "icon": "javascript:alert(2)",
+                "site": "Example"
+            })
+            .to_string(),
+        );
+        link_meta.insert(
+            &mut txn,
+            "https://blog.example/post",
+            json!({
+                "title": "A big post",
+                "image": "https://blog.example/cover.jpg",
+                "icon": "https://blog.example/favicon.ico"
+            })
+            .to_string(),
+        );
+    }
+    let update = doc.transact().encode_state_as_update_v1(&sv);
+    c.handle.send_update(&page, update);
+
+    let mut html = String::new();
+    for _ in 0..50 {
+        html = http().get(&url).send().await.unwrap().text().await.unwrap();
+        if html.contains("A big post") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        html.contains(
+            "<span class=\"lc-title\">Example &lt;script&gt;alert(1)&lt;/script&gt;</span>"
+        ),
+        "{html}"
+    );
+    assert!(!html.contains("<script>alert(1)"));
+    assert!(html.contains("<span class=\"lc-desc\">An &quot;example&quot; &amp; more</span>"));
+    assert!(html.contains("<img src=\"https://example.com/og.png\""));
+    assert!(html.contains("<span>Example</span>"));
+    assert!(!html.contains("javascript:"), "{html}");
+    assert!(html.contains("<span class=\"lc-title\">A big post</span>"));
+    assert!(html.contains("<img src=\"https://blog.example/cover.jpg\""));
+    assert!(html.contains("<img class=\"lc-icon\" src=\"https://blog.example/favicon.ico\""));
+    assert!(html.contains("<span>blog.example</span>"));
+
+    // Revoking the link also closes its asset route.
+    let res = http()
+        .delete(format!("{}/api/shares/{token}", s.base))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 204);
+    let status = http()
+        .get(format!("{url}/assets/{img_name}"))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .as_u16();
+    assert_eq!(status, 404);
 }

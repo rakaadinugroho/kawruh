@@ -362,10 +362,15 @@ pub async fn delete_workspace(
 ) -> ApiResult<Response> {
     require_role(&state, &id, &me.user, Role::Owner)?;
     state.docs.close_workspace(&id);
-    let mut conn = state.db.lock();
-    conn.execute("DELETE FROM page_text WHERE workspace_id = ?1", [&id])?;
-    conn.execute("DELETE FROM workspaces WHERE id = ?1", [&id])?;
-    kawruh_core::store::delete_workspace_docs(&mut conn, &id)?;
+    {
+        let mut conn = state.db.lock();
+        conn.execute("DELETE FROM page_text WHERE workspace_id = ?1", [&id])?;
+        conn.execute("DELETE FROM workspaces WHERE id = ?1", [&id])?;
+        kawruh_core::store::delete_workspace_docs(&mut conn, &id)?;
+    }
+    if let Err(e) = crate::assets::remove_workspace(&state.cfg.data_dir, &id) {
+        tracing::warn!("removing assets of workspace {id} failed: {e}");
+    }
     Ok(no_content())
 }
 

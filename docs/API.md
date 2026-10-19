@@ -33,7 +33,7 @@ Roles: `owner` > `editor` > `viewer`.
 |---|---|---|---|---|
 | GET | `/api/workspaces` | — | any | `200 [{id, name, role}]` |
 | POST | `/api/workspaces` | `{id?, name}` | any | `200 {id, name, role}`; re-posting an id you own is idempotent (used to publish a local workspace); someone else's id → `409 workspace_exists` |
-| DELETE | `/api/workspaces/:id` | — | owner | `204` |
+| DELETE | `/api/workspaces/:id` | — | owner | `204` (documents and assets included) |
 | GET | `/api/workspaces/:id/members` | — | member | `200 [{user_id, username, display_name, role}]` |
 | POST | `/api/workspaces/:id/members` | `{username, role: "editor"\|"viewer"}` | owner | `200 member` (upsert) · `404 user_not_found` |
 | DELETE | `/api/workspaces/:id/members/:user_id` | — | owner | `204` (owner cannot be removed) |
@@ -47,8 +47,49 @@ Roles: `owner` > `editor` > `viewer`.
 | DELETE | `/api/shares/:token` | — | editor+ | `204` |
 | GET | `/s/:token` | — | public | HTML of the shared page (Mermaid rendered client-side, canvas as stored SVG) |
 | GET | `/s/:token/:page_id` | — | public | HTML of a descendant page of the shared page |
+| GET | `/s/:token/assets/:name` | — | public | An asset of the shared page's workspace (see Assets) · `404` otherwise |
 
-`url` = `KAWRUH_PUBLIC_URL + /s/<token>`.
+`url` = `KAWRUH_PUBLIC_URL + /s/<token>`. A revoked link (or a shared page that was
+deleted) also stops serving its assets.
+
+Share pages render a paragraph that holds only a link titled `kawruh:card` or
+`kawruh:preview` as a link card:
+
+```markdown
+[Example Domain](https://example.com "kawruh:card")
+
+[Example Domain](https://example.com "kawruh:preview")
+```
+
+(Each card is its own paragraph; a card link with other text around it stays a plain link.)
+
+`kawruh:card` puts the image to the right of the text, `kawruh:preview` puts a large image
+on top. Card metadata lives in the page doc's root `Y.Map` named `link_meta`:
+key = the link's href, value = a JSON string
+`{"title", "description", "image", "icon", "site"}` (all optional). The title falls back to
+the link text, the site to the URL's domain; without metadata a card shows title + domain.
+Only `http(s)` URLs are used for the card link, image and icon; a card link with any other
+scheme is rendered as plain text. Share pages allow images from `'self'`, `data:`, `https:`
+and `http:` (CSP `img-src`).
+
+## Assets (images)
+
+Content-addressed images, stored at `<KAWRUH_DATA>/assets/<workspace_id>/<name>`.
+Name: `<sha256 of the bytes, 64 lowercase hex>.<ext>` with ext `png` · `jpg` · `gif` · `webp` ·
+`avif` (served as `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/avif`); any other
+name → `400 bad_name`. Page markdown refers to an asset as
+`kawruh-asset://<workspace_id>/<name>`, e.g. `![](kawruh-asset://<workspace_id>/3f…9c.png)`;
+share pages rewrite those of their own workspace to `/s/<token>/assets/<name>` (references to
+other workspaces are left as they are and do not load).
+
+| Method | Path | Body | Who | Response |
+|---|---|---|---|---|
+| PUT | `/api/workspaces/:id/assets/:name` | raw bytes | editor+ | `201 {name, size}` new · `200 {name, size}` already stored (idempotent) · `400 bad_hash` (sha256 of the body ≠ name) · `400 bad_name` · `413 too_large` (> `KAWRUH_MAX_ASSET_MB`) · `507 disk_full` (free disk < `KAWRUH_MIN_FREE_MB`) |
+| GET | `/api/workspaces/:id/assets/:name` | — | member | `200` bytes · `404 not_found` · `400 bad_name` |
+
+Both take the usual bearer token (session or PAT); non-members get `403 forbidden`, an unknown
+workspace `404 workspace_not_found`. Responses carry `X-Content-Type-Options: nosniff` and
+`Cache-Control: private, max-age=31536000, immutable` (`public, …` on the share route).
 
 ## Health
 
@@ -96,3 +137,4 @@ edits are applied to the live documents and reach open editors immediately):
 | `KAWRUH_PUBLIC_URL` | `http://localhost:7420` |
 | `KAWRUH_ALLOW_SIGNUP` | `true` |
 | `KAWRUH_MIN_FREE_MB` | `50` — below this, document writes are refused |
+| `KAWRUH_MAX_ASSET_MB` | `10` — largest accepted asset upload |

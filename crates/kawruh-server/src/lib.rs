@@ -3,6 +3,7 @@
 
 pub mod admin;
 pub mod api;
+pub mod assets;
 pub mod auth;
 pub mod config;
 pub mod db;
@@ -53,10 +54,15 @@ pub fn router(state: AppState) -> Router {
             "/api/workspaces/{id}/shares",
             get(api::list_shares).post(api::create_share),
         )
+        .route(
+            "/api/workspaces/{id}/assets/{name}",
+            get(assets::download).put(assets::upload),
+        )
         .route("/api/shares/{token}", delete(api::delete_share))
         .route("/api/ws", get(ws::handler))
         .route("/s/{token}", get(share::root))
         .route("/s/{token}/{page_id}", get(share::sub))
+        .route("/s/{token}/assets/{name}", get(share::asset))
         .merge(mcp)
         .with_state(state)
 }

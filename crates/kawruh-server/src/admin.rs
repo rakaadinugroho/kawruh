@@ -2,6 +2,8 @@
 //! `kawruh-server admin list-users` and `kawruh-server admin delete-user <name>`.
 //! Stop the service first so no live document is written back afterwards.
 
+use std::path::Path;
+
 use rusqlite::{Connection, params};
 
 pub fn list_users(conn: &Connection) -> rusqlite::Result<Vec<(String, String, i64)>> {
@@ -14,9 +16,13 @@ pub fn list_users(conn: &Connection) -> rusqlite::Result<Vec<(String, String, i6
     rows.collect()
 }
 
-/// Deletes a user, the workspaces they own (documents included) and their
-/// tokens and memberships. Returns how many workspaces were removed.
-pub fn delete_user(conn: &mut Connection, username: &str) -> anyhow::Result<usize> {
+/// Deletes a user, the workspaces they own (documents and assets included)
+/// and their tokens and memberships. Returns how many workspaces were removed.
+pub fn delete_user(
+    conn: &mut Connection,
+    data_dir: &Path,
+    username: &str,
+) -> anyhow::Result<usize> {
     let user_id: String = conn
         .query_row(
             "SELECT id FROM users WHERE username = ?1",
@@ -35,10 +41,14 @@ pub fn delete_user(conn: &mut Connection, username: &str) -> anyhow::Result<usiz
         conn.execute("DELETE FROM workspaces WHERE id = ?1", [ws])?;
     }
     conn.execute("DELETE FROM users WHERE id = ?1", params![user_id])?;
+    for ws in &owned {
+        crate::assets::remove_workspace(data_dir, ws)
+            .map_err(|e| anyhow::anyhow!("removing assets of workspace {ws}: {e}"))?;
+    }
     Ok(owned.len())
 }
 
-pub fn run(args: &[String], conn: &mut Connection) -> anyhow::Result<()> {
+pub fn run(args: &[String], conn: &mut Connection, data_dir: &Path) -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
         Some("list-users") => {
             for (name, display, owned) in list_users(conn)? {
@@ -50,7 +60,7 @@ pub fn run(args: &[String], conn: &mut Connection) -> anyhow::Result<()> {
             let name = args
                 .get(1)
                 .ok_or_else(|| anyhow::anyhow!("usage: admin delete-user <username>"))?;
-            let n = delete_user(conn, name)?;
+            let n = delete_user(conn, data_dir, name)?;
             println!("deleted {name} and {n} owned workspace(s)");
             Ok(())
         }
@@ -92,14 +102,18 @@ mod tests {
             )
             .unwrap();
         }
+        let assets = crate::assets::workspace_dir(&dir, "w1");
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(assets.join("a.png"), b"x").unwrap();
         let mut conn = db.lock();
         assert_eq!(list_users(&conn).unwrap().len(), 1);
-        assert_eq!(delete_user(&mut conn, "alice").unwrap(), 1);
+        assert_eq!(delete_user(&mut conn, &dir, "alice").unwrap(), 1);
+        assert!(!assets.exists());
         assert!(list_users(&conn).unwrap().is_empty());
         let docs: i64 = conn
             .query_row("SELECT COUNT(*) FROM docs", [], |r| r.get(0))
             .unwrap();
         assert_eq!(docs, 0);
-        assert!(delete_user(&mut conn, "nobody").is_err());
+        assert!(delete_user(&mut conn, &dir, "nobody").is_err());
     }
 }

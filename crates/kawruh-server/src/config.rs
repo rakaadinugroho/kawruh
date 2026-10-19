@@ -10,6 +10,7 @@ pub struct Config {
     pub public_url: String,
     pub allow_signup: bool,
     pub min_free_mb: u64,
+    pub max_asset_mb: u64,
 }
 
 impl Config {
@@ -36,6 +37,15 @@ impl Config {
                 .map(|v| v.parse())
                 .transpose()?
                 .unwrap_or(50),
+            max_asset_mb: var("KAWRUH_MAX_ASSET_MB")
+                .map(|v| v.parse())
+                .transpose()?
+                .unwrap_or(10),
         })
+    }
+
+    /// Largest accepted asset upload, in bytes.
+    pub fn max_asset_bytes(&self) -> u64 {
+        self.max_asset_mb.saturating_mul(1024 * 1024)
     }
 }
