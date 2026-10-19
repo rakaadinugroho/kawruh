@@ -11,6 +11,24 @@ function load(): Promise<Mermaid> {
   return loader
 }
 
+/// Configured per render so diagrams follow a system appearance change.
+function configure(m: Mermaid, theme: 'dark' | 'neutral' = dark() ? 'dark' : 'neutral') {
+  m.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme,
+    fontFamily: getComputedStyle(document.body).fontFamily,
+  })
+}
+
+/// A diagram's SVG in the light theme, for printing.
+export async function renderMermaidSvg(content: string): Promise<string> {
+  const m = await load()
+  configure(m, 'neutral')
+  const { svg } = await m.render(`kw-mermaid-${++seq}`, content)
+  return svg
+}
+
 export function renderMermaidPreview(
   language: string,
   content: string,
@@ -19,13 +37,7 @@ export function renderMermaidPreview(
   if (language.trim().toLowerCase() !== 'mermaid' || !content.trim()) return null
   load()
     .then(async (m) => {
-      // Configured per render so diagrams follow a system appearance change.
-      m.initialize({
-        startOnLoad: false,
-        securityLevel: 'strict',
-        theme: dark() ? 'dark' : 'neutral',
-        fontFamily: getComputedStyle(document.body).fontFamily,
-      })
+      configure(m)
       const el = document.createElement('div')
       try {
         const { svg } = await m.render(`kw-mermaid-${++seq}`, content)

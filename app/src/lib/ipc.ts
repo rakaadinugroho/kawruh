@@ -32,6 +32,17 @@ export type LinkMeta = {
   site?: string
 }
 
+/// One page laid out for PDF export (see page_print_data).
+export type PrintPage = {
+  id: string
+  title: string
+  icon: string
+  depth: number
+  markdown: string
+  canvases: Record<string, string>
+  links: Record<string, string>
+}
+
 export type RemoteWorkspace = { id: string; name: string; role: Role; attached: boolean }
 export type Member = { userId: string; username: string; displayName: string; role: Role }
 export type Share = { token: string; pageId: string; url: string; createdAt?: number | null }
@@ -120,6 +131,12 @@ export const api = {
       headers: { 'x-kawruh-workspace': workspaceId, 'x-kawruh-mime': mime },
     }),
   linkPreview: (url: string) => invoke<LinkMeta>('link_preview', { url }),
+
+  pagePrintData: (workspaceId: string, pageId: string, includeChildren: boolean) =>
+    invoke<PrintPage[]>('page_print_data', { workspaceId, pageId, includeChildren }),
+  /// Prints the prepared layout: a PDF via save dialog on macOS (its path), the
+  /// system print dialog elsewhere (null).
+  exportPdf: (title: string) => invoke<string | null>('page_export_pdf', { title }),
 
   settingGet: (key: string) => invoke<string | null>('setting_get', { key }),
   settingSet: (key: string, value: string) => invoke<void>('setting_set', { key, value }),

@@ -11,6 +11,7 @@ import { TrashDialog } from './components/TrashDialog'
 import { JoinDialog, NewWorkspaceDialog } from './components/WorkspaceDialogs'
 import { useDoc, useWorkspaceView } from './lib/hooks'
 import { type SyncState, api } from './lib/ipc'
+import { parseAppearance } from './lib/appearance'
 import { currentWorkspace, useApp } from './lib/store'
 import { createPage } from './lib/workspace'
 
@@ -41,6 +42,8 @@ export default function App() {
     ;(async () => {
       try {
         await refresh()
+        const [font, size] = await Promise.all([api.settingGet('docFont'), api.settingGet('docSize')])
+        if (font || size) useApp.getState().setAppearance(parseAppearance(font, size), false)
         const last = await api.settingGet('lastWorkspace')
         if (last && useApp.getState().workspaces.some((w) => w.id === last)) selectWorkspace(last)
         // Pick up role changes made while the app was closed.

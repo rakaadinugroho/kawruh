@@ -2,7 +2,8 @@
 
 A markdown notebook for the desktop. Pages nest like Notion, the editor is
 WYSIWYG but everything is markdown underneath, and Mermaid diagrams, canvas
-drawings, pasted screenshots and link cards live right in the page. Workspaces stay on your computer until you publish
+drawings, pasted screenshots and link cards live right in the page. Pick a serif,
+sans or mono font, and export any page (with its sub-pages) as markdown or PDF. Workspaces stay on your computer until you publish
 them to your own Kawruh server; then people edit together live, read-only links
 can be shared, and AI agents can read and write pages over MCP.
 

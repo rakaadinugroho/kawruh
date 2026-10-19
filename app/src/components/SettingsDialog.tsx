@@ -1,5 +1,6 @@
 import { Copy, KeyRound, LogOut, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import type { DocFont, DocSize } from '../lib/appearance'
 import { type ApiToken, type AppInfo, api } from '../lib/ipc'
 import { useApp } from '../lib/store'
 import { thisDevice } from '../lib/platform'
@@ -7,7 +8,7 @@ import { AccountForm } from './AccountForm'
 import { host } from './Sidebar'
 import { Button, Dialog, Field, IconButton, copyText, inputClass } from './ui'
 
-type Tab = 'accounts' | 'tokens' | 'about'
+type Tab = 'accounts' | 'appearance' | 'tokens' | 'about'
 
 export function SettingsDialog({ open, tab: initialTab, onClose }: {
   open: boolean
@@ -25,6 +26,7 @@ export function SettingsDialog({ open, tab: initialTab, onClose }: {
         {(
           [
             ['accounts', 'Accounts'],
+            ['appearance', 'Appearance'],
             ['tokens', 'API tokens'],
             ['about', 'About'],
           ] as const
@@ -44,9 +46,87 @@ export function SettingsDialog({ open, tab: initialTab, onClose }: {
         ))}
       </div>
       {tab === 'accounts' && <AccountsTab />}
+      {tab === 'appearance' && <AppearanceTab />}
       {tab === 'tokens' && <TokensTab />}
       {tab === 'about' && <AboutTab />}
     </Dialog>
+  )
+}
+
+const FONTS: { key: DocFont; label: string; detail: string }[] = [
+  { key: 'serif', label: 'Serif', detail: 'Literata' },
+  { key: 'sans', label: 'Sans', detail: 'System' },
+  { key: 'mono', label: 'Mono', detail: 'Monospace' },
+]
+
+const SIZES: { key: DocSize; label: string }[] = [
+  { key: 'small', label: 'Small' },
+  { key: 'default', label: 'Default' },
+  { key: 'large', label: 'Large' },
+]
+
+function AppearanceTab() {
+  const appearance = useApp((s) => s.appearance)
+  const setAppearance = useApp((s) => s.setAppearance)
+  return (
+    <div className="flex flex-col gap-5">
+      <section>
+        <h3 className="mb-2 text-[12px] font-medium text-ink-2">Page font</h3>
+        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Page font">
+          {FONTS.map((f) => {
+            const selected = appearance.font === f.key
+            return (
+              <button
+                key={f.key}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => setAppearance({ font: f.key })}
+                className={`press flex flex-col items-start gap-1.5 rounded-lg p-3 text-left ${
+                  selected
+                    ? 'bg-accent-soft shadow-[inset_0_0_0_1.5px_var(--accent)]'
+                    : 'shadow-[inset_0_0_0_1px_var(--line)] hover:bg-hover'
+                }`}
+              >
+                <span
+                  className="text-[30px] leading-none text-ink"
+                  style={{ fontFamily: `var(--font-${f.key})` }}
+                  aria-hidden
+                >
+                  Ag
+                </span>
+                <span className="text-[13px] font-medium text-ink">{f.label}</span>
+                <span className="text-[11px] text-ink-3">{f.detail}</span>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+      <section>
+        <h3 className="mb-2 text-[12px] font-medium text-ink-2">Text size</h3>
+        <div className="flex gap-1 rounded-md bg-hover p-0.5" role="radiogroup" aria-label="Text size">
+          {SIZES.map((z) => (
+            <button
+              key={z.key}
+              type="button"
+              role="radio"
+              aria-checked={appearance.size === z.key}
+              onClick={() => setAppearance({ size: z.key })}
+              className={`press h-7 flex-1 rounded-[5px] text-[12px] font-medium ${
+                appearance.size === z.key
+                  ? 'bg-raised text-ink shadow-[0_1px_2px_oklch(0_0_0/0.08)]'
+                  : 'text-ink-2'
+              }`}
+            >
+              {z.label}
+            </button>
+          ))}
+        </div>
+      </section>
+      <p className="text-[12px] leading-relaxed text-ink-3">
+        Used for pages and exported PDFs on {thisDevice}. Collaborators keep their own choice.
+      </p>
+    </div>
   )
 }
 

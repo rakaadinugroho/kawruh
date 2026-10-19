@@ -1,10 +1,11 @@
 import { create } from 'zustand'
+import { type Appearance, applyAppearance, cachedAppearance } from './appearance'
 import { closeWorkspaceDocs } from './docs'
 import { type Account, type WorkspaceInfo, api, errorMessage } from './ipc'
 
 export type DialogName =
   | null
-  | { kind: 'settings'; tab?: 'accounts' | 'tokens' | 'about' }
+  | { kind: 'settings'; tab?: 'accounts' | 'appearance' | 'tokens' | 'about' }
   | { kind: 'newWorkspace' }
   | { kind: 'join' }
   | { kind: 'share' }
@@ -22,6 +23,7 @@ type State = {
   dialog: DialogName
   toasts: Toast[]
   loaded: boolean
+  appearance: Appearance
 
   refresh: () => Promise<void>
   selectWorkspace: (id: string) => void
@@ -32,6 +34,8 @@ type State = {
   toast: (text: string, tone?: Toast['tone']) => void
   fail: (e: unknown) => void
   forgetWorkspace: (id: string) => Promise<void>
+  /// Applies a page font/size change; `save` keeps it for next time.
+  setAppearance: (patch: Partial<Appearance>, save?: boolean) => void
 }
 
 let toastId = 0
@@ -47,6 +51,7 @@ export const useApp = create<State>((set, get) => ({
   dialog: null,
   toasts: [],
   loaded: false,
+  appearance: cachedAppearance(),
 
   refresh: async () => {
     const [workspaces, accounts] = await Promise.all([api.workspaces(), api.accounts()])
@@ -89,6 +94,16 @@ export const useApp = create<State>((set, get) => ({
     await api.forgetWorkspace(id)
     set({ workspaceId: null, pageId: null })
     await get().refresh()
+  },
+
+  setAppearance: (patch, save = true) => {
+    const appearance = { ...get().appearance, ...patch }
+    set({ appearance })
+    applyAppearance(appearance)
+    if (save) {
+      remember('docFont', appearance.font)
+      remember('docSize', appearance.size)
+    }
   },
 }))
 

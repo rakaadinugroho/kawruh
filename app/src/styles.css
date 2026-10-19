@@ -23,6 +23,9 @@
   --danger: oklch(0.55 0.17 28);
   --shadow-pop: 0 0 0 1px oklch(0.24 0.03 265 / 0.08), 0 8px 24px -6px oklch(0.24 0.03 265 / 0.18),
     0 2px 6px oklch(0.24 0.03 265 / 0.08);
+  /* Page font and size, chosen in Settings → Appearance (set on <html>). */
+  --doc-font: var(--font-serif);
+  --doc-size: 17px;
   color-scheme: light;
 }
 
@@ -191,9 +194,9 @@ button {
   --crepe-color-hover: var(--hover);
   --crepe-color-selected: var(--accent-soft);
   --crepe-color-inline-area: var(--hover-2);
-  --crepe-base-font-size: 17px;
-  --crepe-font-title: var(--font-serif);
-  --crepe-font-default: var(--font-serif);
+  --crepe-base-font-size: var(--doc-size);
+  --crepe-font-title: var(--doc-font);
+  --crepe-font-default: var(--doc-font);
   --crepe-font-code: var(--font-mono);
   --crepe-shadow-1: var(--shadow-pop);
   --crepe-shadow-2: var(--shadow-pop);
@@ -506,5 +509,175 @@ button {
 @media (prefers-color-scheme: dark) {
   .kw-canvas-preview img {
     filter: invert(0.88) hue-rotate(180deg);
+  }
+}
+
+/* ---------------------------------------------------------------- print (PDF export) */
+
+/* Built by editor/print.ts; hidden on screen, the only thing printed. */
+.kw-print {
+  display: none;
+}
+@media print {
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  body > :not(.kw-print) {
+    display: none !important;
+  }
+  .kw-print {
+    /* Always ink on paper, whatever the app theme. */
+    --paper: oklch(0.985 0.007 85);
+    --raised: #fff;
+    --ink: oklch(0.24 0.03 265);
+    --ink-2: oklch(0.45 0.025 265);
+    --ink-3: oklch(0.62 0.018 265);
+    --line: oklch(0.885 0.012 85);
+    --hover: oklch(0.24 0.03 265 / 0.06);
+    --accent: oklch(0.38 0.1 265);
+    display: block;
+    color: var(--ink);
+    font-family: var(--doc-font);
+    font-size: var(--doc-size);
+    line-height: 1.65;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .kw-print-page + .kw-print-page {
+    break-before: page;
+  }
+  .kw-print-path {
+    margin-bottom: 6px;
+    font: 11px/1.4 var(--font-sans);
+    color: var(--ink-3);
+  }
+  .kw-print-title {
+    margin: 0 0 0.7em;
+    font-size: 2.1em;
+    font-weight: 650;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+  .kw-print-toc {
+    margin: 0 0 1.6em;
+    padding: 10px 14px;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 0 0 1px var(--line);
+    font: 13px/1.7 var(--font-sans);
+    color: var(--ink-2);
+  }
+  .kw-print-toc-label {
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .kw-print-body h1,
+  .kw-print-body h2,
+  .kw-print-body h3,
+  .kw-print-body h4 {
+    margin: 1.3em 0 0.45em;
+    font-weight: 650;
+    line-height: 1.25;
+    break-after: avoid;
+  }
+  .kw-print-body h1 {
+    font-size: 1.75em;
+  }
+  .kw-print-body h2 {
+    font-size: 1.42em;
+  }
+  .kw-print-body h3 {
+    font-size: 1.18em;
+  }
+  .kw-print-body p {
+    margin: 0.55em 0;
+  }
+  .kw-print-body a {
+    color: var(--accent);
+  }
+  .kw-print-body ul,
+  .kw-print-body ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }
+  .kw-print-body li[data-item-type='task'] {
+    list-style: none;
+  }
+  .kw-print-body li[data-item-type='task']::before {
+    content: '☐';
+    display: inline-block;
+    width: 1.4em;
+    margin-left: -1.4em;
+  }
+  .kw-print-body li[data-item-type='task'][data-checked='true']::before {
+    content: '☑';
+  }
+  .kw-print-body li > p {
+    display: inline;
+    margin: 0;
+  }
+  .kw-print-body blockquote {
+    margin: 0.8em 0;
+    padding-left: 1em;
+    border-left: 3px solid var(--line);
+    color: var(--ink-2);
+  }
+  .kw-print-body pre {
+    margin: 0.8em 0;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: oklch(0.96 0.006 85);
+    font: 0.82em/1.55 var(--font-mono);
+    white-space: pre-wrap;
+    break-inside: avoid;
+  }
+  .kw-print-body :not(pre) > code {
+    padding: 0.1em 0.3em;
+    border-radius: var(--radius-sm);
+    background: oklch(0.95 0.006 85);
+    font: 0.86em var(--font-mono);
+  }
+  .kw-print-body table {
+    margin: 0.8em 0;
+    border-collapse: collapse;
+    font-size: 0.92em;
+  }
+  .kw-print-body th,
+  .kw-print-body td {
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    text-align: left;
+  }
+  .kw-print-body hr {
+    margin: 1.4em 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+  .kw-print-body img {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-md);
+    break-inside: avoid;
+  }
+  .kw-print .kw-mermaid,
+  .kw-print-canvas,
+  .kw-print .kw-link {
+    break-inside: avoid;
+  }
+  .kw-print-canvas {
+    margin: 0.8em 0;
+    padding: 12px;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 0 0 1px var(--line);
+    text-align: center;
+  }
+  .kw-print-canvas img {
+    max-height: 520px;
+  }
+  .kw-print .kw-link-card {
+    color: var(--ink);
+    text-decoration: none;
   }
 }

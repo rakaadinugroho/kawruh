@@ -5,8 +5,8 @@
 //! response is `{ ok, value }`. A body of `SNAPSHOT <path> [width]` writes a
 //! TIFF of the webview instead (WKWebView.takeSnapshot; no screen-recording
 //! permission needed); `width` in points re-renders it larger than the window.
-//! `THEME dark|light|system` switches the window appearance. Compiled out of
-//! release builds.
+//! `THEME dark|light|system` switches the window appearance; `PDF <path>`
+//! prints the page layout to a file. Compiled out of release builds.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -69,6 +69,11 @@ pub fn start(app: AppHandle) {
                     snapshot(&app, path, width).await
                 } else if let Some(theme) = body.strip_prefix("THEME ") {
                     set_theme(&app, theme.trim())
+                } else if let Some(path) = body.strip_prefix("PDF ") {
+                    match crate::pdf::print_to_pdf(&app, std::path::Path::new(path.trim())).await {
+                        Ok(()) => (true, path.trim().to_string()),
+                        Err(e) => (false, e.to_string()),
+                    }
                 } else {
                     eval(&app, id, &body).await
                 };

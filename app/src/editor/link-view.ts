@@ -26,6 +26,28 @@ function img(src: string, className: string) {
   return i
 }
 
+/// Fills `card` (the <a>) with a card's content: title, description, site and
+/// image, laid out for `view`. Used by the editor and by PDF export.
+export function fillLinkCard(
+  card: HTMLAnchorElement,
+  { href, label, view, meta }: { href: string; label: string; view: LinkView; meta: LinkMeta }
+) {
+  const title = meta.title || label || href
+  card.href = href
+  card.title = href
+  const text = el('div', 'kw-link-text')
+  text.append(el('div', 'kw-link-title', title))
+  if (meta.description) text.append(el('div', 'kw-link-desc', meta.description))
+  const site = el('div', 'kw-link-site')
+  if (meta.icon) site.append(img(meta.icon, 'kw-link-icon'))
+  site.append(el('span', '', meta.site || hostOf(href)))
+  text.append(site)
+  card.replaceChildren()
+  if (view === 'preview' && meta.image) card.append(img(meta.image, 'kw-link-hero'))
+  card.append(text)
+  if (view === 'card' && meta.image) card.append(img(meta.image, 'kw-link-thumb'))
+}
+
 export function linkCardView(doc: Y.Doc, canWrite: () => boolean) {
   return $view(linkCardSchema.node, (ctx) => (initial, view, getPos) => {
     let node: Node = initial
@@ -71,24 +93,13 @@ export function linkCardView(doc: Y.Doc, canWrite: () => boolean) {
 
     const render = () => {
       const kind = (node.attrs.view === 'preview' ? 'preview' : 'card') as LinkView
-      const meta: LinkMeta = readMeta(doc, href()) ?? {}
-      const title = meta.title || String(node.attrs.label || '') || href()
       dom.dataset.view = kind
-      card.href = href()
-      card.title = href()
-
-      const text = el('div', 'kw-link-text')
-      text.append(el('div', 'kw-link-title', title))
-      if (meta.description) text.append(el('div', 'kw-link-desc', meta.description))
-      const site = el('div', 'kw-link-site')
-      if (meta.icon) site.append(img(meta.icon, 'kw-link-icon'))
-      site.append(el('span', '', meta.site || hostOf(href())))
-      text.append(site)
-
-      card.replaceChildren()
-      if (kind === 'preview' && meta.image) card.append(img(meta.image, 'kw-link-hero'))
-      card.append(text)
-      if (kind === 'card' && meta.image) card.append(img(meta.image, 'kw-link-thumb'))
+      fillLinkCard(card, {
+        href: href(),
+        label: String(node.attrs.label || ''),
+        view: kind,
+        meta: readMeta(doc, href()) ?? {},
+      })
 
       tools.replaceChildren()
       if (canWrite()) {

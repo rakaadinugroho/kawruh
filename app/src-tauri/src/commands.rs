@@ -553,20 +553,10 @@ pub async fn page_export_file(
         .strip_prefix("# ")
         .and_then(|rest| rest.lines().next())
         .unwrap_or("Untitled");
-    let file_name: String = title
-        .chars()
-        .map(|c| {
-            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
-                '-'
-            } else {
-                c
-            }
-        })
-        .collect();
     let Some(picked) = app
         .dialog()
         .file()
-        .set_file_name(format!("{}.md", file_name.trim()))
+        .set_file_name(format!("{}.md", file_name(title)))
         .add_filter("Markdown", &["md"])
         .blocking_save_file()
     else {
@@ -675,6 +665,139 @@ pub async fn page_import_file(
     Ok(Some(page))
 }
 
+/// A page title as a file name: path separators and reserved characters become dashes.
+fn file_name(title: &str) -> String {
+    let name: String = title
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let name = name.trim();
+    if name.is_empty() {
+        "Untitled".into()
+    } else {
+        name.into()
+    }
+}
+
+// ------------------------------------------------------------------------ PDF
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrintPage {
+    id: String,
+    title: String,
+    icon: String,
+    /// 0 for the exported page, 1 for its sub-pages, and so on.
+    depth: usize,
+    markdown: String,
+    /// Canvas id → SVG preview.
+    canvases: std::collections::HashMap<String, String>,
+    /// Link card href → metadata JSON.
+    links: std::collections::HashMap<String, String>,
+}
+
+/// A page, and with `include_children` its whole sub-tree in outline order,
+/// with what the webview needs to lay it out for printing.
+#[tauri::command]
+pub fn page_print_data(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    page_id: String,
+    include_children: bool,
+) -> Result<Vec<PrintPage>> {
+    let ws = state.hub.get_or_load(&workspace_id, &workspace_id)?;
+    let live = workspace::live_pages(&ws);
+    if !live.iter().any(|p| p.id == page_id) {
+        return Err(Error::msg("page not found"));
+    }
+    let mut order = Vec::new();
+    outline(&live, &page_id, 0, include_children, &mut order);
+    order
+        .into_iter()
+        .map(|(page, depth)| {
+            let doc = state.hub.get_or_load(&page.id, &workspace_id)?;
+            Ok(PrintPage {
+                id: page.id.clone(),
+                title: page.title.clone(),
+                icon: page.icon.clone(),
+                depth,
+                markdown: markdown::doc_to_markdown(&doc),
+                canvases: string_map(&doc, "canvas_svg"),
+                links: string_map(&doc, "link_meta"),
+            })
+        })
+        .collect()
+}
+
+/// Depth-first: a page, then each child's sub-tree in sibling order.
+fn outline<'a>(
+    live: &'a [workspace::PageMeta],
+    id: &str,
+    depth: usize,
+    deep: bool,
+    out: &mut Vec<(&'a workspace::PageMeta, usize)>,
+) {
+    let Some(page) = live.iter().find(|p| p.id == id) else {
+        return;
+    };
+    out.push((page, depth));
+    if deep {
+        for child in live.iter().filter(|p| p.parent == id) {
+            outline(live, &child.id, depth + 1, deep, out);
+        }
+    }
+}
+
+fn string_map(
+    doc: &kawruh_core::yrs::Doc,
+    name: &str,
+) -> std::collections::HashMap<String, String> {
+    use kawruh_core::yrs::{Any, Map, Out, Transact};
+    let map = doc.get_or_insert_map(name);
+    let txn = doc.transact();
+    map.iter(&txn)
+        .filter_map(|(k, v)| match v {
+            Out::Any(Any::String(s)) => Some((k.to_string(), s.to_string())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Saves the print layout the webview has just prepared: as a PDF file picked
+/// in a save dialog on macOS (returns its path), or through the system print
+/// dialog elsewhere (returns None).
+#[tauri::command]
+pub async fn page_export_pdf(app: tauri::AppHandle, title: String) -> Result<Option<String>> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_dialog::DialogExt;
+        let Some(picked) = app
+            .dialog()
+            .file()
+            .set_file_name(format!("{}.pdf", file_name(&title)))
+            .add_filter("PDF", &["pdf"])
+            .blocking_save_file()
+        else {
+            return Ok(None);
+        };
+        let path = picked.into_path().map_err(|e| Error::msg(e.to_string()))?;
+        crate::pdf::print_to_pdf(&app, &path).await?;
+        Ok(Some(path.display().to_string()))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = title;
+        crate::pdf::print_to_pdf(&app, std::path::Path::new("")).await?;
+        Ok(None)
+    }
+}
+
 // -------------------------------------------------------------- images, links
 
 /// Stores a pasted image. The webview sends the raw bytes as the request body
@@ -721,7 +844,45 @@ pub fn setting_set(state: State<'_, AppState>, key: String, value: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{relink_local_images, split_title};
+    use super::{file_name, outline, relink_local_images, split_title};
+    use kawruh_core::workspace::PageMeta;
+
+    fn page(id: &str, parent: &str, order: f64) -> PageMeta {
+        PageMeta {
+            id: id.into(),
+            title: id.to_uppercase(),
+            parent: parent.into(),
+            order,
+            icon: String::new(),
+            created: 0,
+            deleted: 0,
+        }
+    }
+
+    #[test]
+    fn print_outline_is_depth_first_in_sibling_order() {
+        // live_pages already sorts by order.
+        let live = vec![
+            page("root", "", 1.0),
+            page("a", "root", 1.0),
+            page("other", "", 2.0),
+            page("b", "root", 2.0),
+            page("a1", "a", 1.0),
+        ];
+        let mut out = Vec::new();
+        outline(&live, "root", 0, true, &mut out);
+        let got: Vec<_> = out.iter().map(|(p, d)| (p.id.as_str(), *d)).collect();
+        assert_eq!(got, vec![("root", 0), ("a", 1), ("a1", 2), ("b", 1)]);
+        let mut shallow = Vec::new();
+        outline(&live, "root", 0, false, &mut shallow);
+        assert_eq!(shallow.len(), 1);
+    }
+
+    #[test]
+    fn titles_become_safe_file_names() {
+        assert_eq!(file_name("Q4: plan / v2?"), "Q4- plan - v2-");
+        assert_eq!(file_name("   "), "Untitled");
+    }
 
     #[test]
     fn imports_images_next_to_the_markdown_file() {

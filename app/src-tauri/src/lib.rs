@@ -6,6 +6,7 @@ mod e2e;
 mod error;
 mod hub;
 mod linkmeta;
+mod pdf;
 mod remote;
 mod sync;
 
@@ -138,6 +139,8 @@ pub fn run() {
         commands::page_import_markdown,
         commands::page_export_file,
         commands::page_import_file,
+        commands::page_print_data,
+        commands::page_export_pdf,
         commands::asset_put,
         commands::link_preview,
         commands::setting_get,
@@ -173,6 +176,8 @@ pub fn run() {
         commands::page_import_markdown,
         commands::page_export_file,
         commands::page_import_file,
+        commands::page_print_data,
+        commands::page_export_pdf,
         commands::asset_put,
         commands::link_preview,
         commands::setting_get,

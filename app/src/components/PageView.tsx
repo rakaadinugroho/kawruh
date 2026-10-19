@@ -2,6 +2,7 @@ import {
   ChevronRight,
   ClipboardCopy,
   Download,
+  FileDown,
   FilePlus2,
   FileText,
   MoreHorizontal,
@@ -19,7 +20,7 @@ import type { DocHandle } from '../lib/docs'
 import { type WorkspaceView, colorFor, useDoc, usePeers } from '../lib/hooks'
 import { api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
-import { key } from '../lib/platform'
+import { isMac, key } from '../lib/platform'
 import {
   type Page,
   childrenOf,
@@ -127,7 +128,7 @@ function TitleInput({ value, readonly, onChange, onEnter }: {
           onEnter()
         }
       }}
-      className="w-full resize-none overflow-hidden bg-transparent font-serif text-[40px] leading-[1.15] font-[650] tracking-[-0.022em] text-ink outline-none placeholder:text-ink-3/60 [font-variation-settings:'opsz'_60]"
+      className="w-full resize-none overflow-hidden bg-transparent [font-family:var(--doc-font)] text-[length:calc(var(--doc-size)*2.35)] leading-[1.15] font-[650] tracking-[-0.022em] text-ink outline-none placeholder:text-ink-3/60 [font-variation-settings:'opsz'_60]"
     />
   )
 }
@@ -183,6 +184,29 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
     }
   }
 
+  /// Lays the page (and maybe its sub-pages) out for print, then saves a PDF.
+  const exportPdf = async (withChildren: boolean) => {
+    if (!ws || !page) return
+    let layout: HTMLElement | null = null
+    try {
+      const pages = await api.pagePrintData(ws.id, page.id, withChildren)
+      const { preparePrint } = await import('../editor/print')
+      layout = await preparePrint(pages)
+      const path = await api.exportPdf(page.title || 'Untitled')
+      if (path) toast('Exported PDF')
+    } catch (e) {
+      fail(e)
+    } finally {
+      if (layout && isMac) layout.remove()
+      else if (layout) {
+        // The system print dialog reads the layout until it closes.
+        const done = layout
+        window.addEventListener('afterprint', () => done.remove(), { once: true })
+        setTimeout(() => done.remove(), 10 * 60_000)
+      }
+    }
+  }
+
   const copyMd = async () => {
     if (!ws || !page) return
     try {
@@ -231,6 +255,16 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
             },
             { label: 'Copy as markdown', icon: <ClipboardCopy size={14} />, onSelect: copyMd },
             { label: 'Export markdown…', icon: <Download size={14} />, onSelect: exportMd },
+            { label: 'Export PDF…', icon: <FileDown size={14} />, onSelect: () => exportPdf(false) },
+            ...(children.length > 0
+              ? [
+                  {
+                    label: 'Export PDF with sub-pages…',
+                    icon: <FileDown size={14} />,
+                    onSelect: () => exportPdf(true),
+                  },
+                ]
+              : []),
             {
               label: 'Import markdown as sub-page…',
               icon: <Upload size={14} />,
