@@ -59,6 +59,12 @@ Page bodies are GitHub-flavoured markdown. Titles are not part of the body: use
 - Diagrams: ` ```mermaid ` fenced blocks render as Mermaid in the app and on share pages.
 - Drawings: ` ```kawruh-canvas ` blocks hold a canvas id; leave them in place when
   rewriting a page or the drawing is detached from the page.
+- Link cards: a paragraph that is only `[Title](https://… "kawruh:card")` shows as a
+  bookmark card (`"kawruh:preview"` for a large preview). Elsewhere it reads as a
+  normal link, so it's safe to write.
+- Images pasted in the app appear as `![](kawruh-asset://<workspace>/<sha256>.png)`.
+  Keep those refs when rewriting a page; agents can't upload new images yet, but
+  ordinary `https://` image URLs work.
 - `search_pages` reads an index refreshed about two seconds after each edit.
 
 ## Example prompts

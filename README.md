@@ -1,8 +1,8 @@
 # Kawruh
 
 A markdown notebook for the desktop. Pages nest like Notion, the editor is
-WYSIWYG but everything is markdown underneath, and Mermaid diagrams and canvas
-drawings live right in the page. Workspaces stay on your computer until you publish
+WYSIWYG but everything is markdown underneath, and Mermaid diagrams, canvas
+drawings, pasted screenshots and link cards live right in the page. Workspaces stay on your computer until you publish
 them to your own Kawruh server; then people edit together live, read-only links
 can be shared, and AI agents can read and write pages over MCP.
 
@@ -123,7 +123,8 @@ It is compiled out of release builds.
 - Tested on macOS. Windows builds and passes tests in CI but hasn't been tried on a
   real machine; its title bar keeps the macOS traffic-light gutter.
 - Permissions are per workspace (owner / editor / viewer), not per page.
-- Images by URL only; pasting image files is ignored.
+- Images up to 10 MB each (PNG, JPEG, GIF, WebP, AVIF). They aren't removed from
+  the server when a page stops using them.
 - The server speaks plain HTTP: use it on your LAN or over Tailscale. Exposing it
   publicly needs HTTPS in front (e.g. a Cloudflare tunnel).
 - Server tokens are stored unencrypted in the app's local database.
