@@ -50,6 +50,23 @@ All optional. Without any of them the release still builds.
 | `APPLE_SIGNING_IDENTITY` | secret | e.g. `Developer ID Application: Name (TEAMID)` |
 | `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | secrets | Notarization (`APPLE_PASSWORD` is an app-specific password) |
 
+## Auto-update
+
+Apps from v0.4.0 check `releases/latest/download/latest.json` at launch and
+every 6 hours, and offer "Restart to update". Each release signs its update
+bundles (`*.app.tar.gz`, `*-setup.exe`) with the updater key, and the publish
+job writes `latest.json` from their `.sig` files. Pre-releases are skipped.
+
+- The public key is in `app/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`).
+- The private key is the `TAURI_SIGNING_PRIVATE_KEY` repository secret; the
+  original lives at `~/.tauri/kawruh-updater.key` on the machine that made it.
+  **Back it up.** Without it, installed apps can't verify new versions and
+  would need a manual reinstall with a new key.
+- Local release builds sign too, so give them the key:
+  `TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/kawruh-updater.key)" pnpm tauri build`,
+  or skip update bundles with
+  `pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'`.
+
 ## Unsigned builds
 
 Without the Apple secrets the macOS app is ad-hoc signed. macOS blocks it the

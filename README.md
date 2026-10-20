@@ -2,10 +2,18 @@
 
 A markdown notebook for the desktop. Pages nest like Notion, the editor is
 WYSIWYG but everything is markdown underneath, and Mermaid diagrams, canvas
-drawings, pasted screenshots and link cards live right in the page. Pick a serif,
-sans or mono font, and export any page (with its sub-pages) as markdown or PDF. Workspaces stay on your computer until you publish
-them to your own Kawruh server; then people edit together live, read-only links
-can be shared, and AI agents can read and write pages over MCP.
+drawings, pasted screenshots and link cards live right in the page. Workspaces
+stay on your computer until you publish them to your own Kawruh server; then
+people edit together live, read-only links can be shared, and AI agents can read
+and write pages over MCP.
+
+- **Link pages** with `[[`, and see what links back to each page.
+- **Search** titles and page text with ⌘K.
+- **Templates** (daily note, meeting notes, your own) and **page history** with restore.
+- **Import** a Notion export or an Obsidian vault; **export** a workspace, a page
+  (with its sub-pages) as markdown, or as PDF.
+- **Open `.md` files** with Kawruh, pick a serif, sans or mono font, and get
+  **updates** automatically.
 
 *Kawruh* is Javanese for knowledge.
 
@@ -113,6 +121,7 @@ KAWRUH_SSH_PASS=… deploy/deploy.sh          # cross-compile (aarch64-musl), up
 KAWRUH_SSH_PASS=… deploy/deploy.sh --release v0.2.0   # install a release build instead
 KAWRUH_SSH_PASS=… deploy/deploy.sh --rollback
 KAWRUH_SSH_PASS=… deploy/admin.sh list-users
+KAWRUH_SSH_PASS=… deploy/admin.sh invite                # prints a sign-up code
 KAWRUH_SSH_PASS=… deploy/admin.sh delete-user <name>   # also removes workspaces they own
 curl http://<host>:7420/api/health
 ```
@@ -120,8 +129,14 @@ curl http://<host>:7420/api/health
 The scripts deploy to `KAWRUH_HOST` (`user@host`); put it in `deploy/.env.local`
 (gitignored) so you don't have to type it.
 
-Config lives in `/etc/kawruh/kawruh.env` (`KAWRUH_ALLOW_SIGNUP=false` closes
-registration once everyone has an account); data in `/var/lib/kawruh`.
+Config lives in `/etc/kawruh/kawruh.env`, data in `/var/lib/kawruh`. For a server
+others can reach:
+
+- `KAWRUH_ALLOW_SIGNUP=false` makes it invite-only. The first account can always be
+  created; after that, people need a code from **Settings → Accounts → Invite**
+  (or `admin invite`). Codes work once, for 7 days.
+- `KAWRUH_QUOTA_MB=200` caps the images each workspace owner can store (default: no cap).
+- Logins are limited to 10 failures per 15 minutes per username or address.
 
 ## Tests
 

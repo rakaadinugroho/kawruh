@@ -2,6 +2,7 @@
 # Runs `kawruh-server admin …` on the homelab as the service user.
 #
 #   deploy/admin.sh list-users
+#   deploy/admin.sh invite                     prints a single-use sign-up code
 #   deploy/admin.sh delete-user <username>     (stops the service while it runs)
 #
 # Host: KAWRUH_HOST=user@host (deploy/.env.local is read if present).
