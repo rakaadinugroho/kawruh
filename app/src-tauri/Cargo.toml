@@ -34,6 +34,8 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Importing a Notion export: reads deflate zips only.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # PDF export (print to file) and the debug-build E2E hook's webview snapshots.
 [target.'cfg(target_os = "macos")'.dependencies]

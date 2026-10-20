@@ -180,6 +180,20 @@ fn image_srcs_can_be_rewritten() {
 }
 
 #[test]
+fn link_hrefs_can_be_rewritten() {
+    let md =
+        "See [**it**](Other.md) and [web](https://e.com)\n\n[Card](Other.md \"kawruh:card\")\n";
+    let out = crate::markdown::map_link_hrefs(md, |href| {
+        (href == "Other.md").then(|| "kawruh://page/abc".to_string())
+    });
+    assert_eq!(
+        out,
+        "See [**it**](kawruh://page/abc) and [web](https://e.com)\n\n\
+         [Card](kawruh://page/abc \"kawruh:card\")\n"
+    );
+}
+
+#[test]
 fn html_is_escaped_in_share_rendering() {
     let html = markdown_to_html("hi <script>alert(1)</script>");
     assert!(!html.contains("<script>"), "{html}");

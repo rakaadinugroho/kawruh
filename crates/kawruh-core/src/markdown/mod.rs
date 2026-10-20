@@ -67,6 +67,48 @@ pub fn map_image_srcs(md: &str, mut f: impl FnMut(&str) -> Option<String>) -> St
     pnode_to_markdown(&doc)
 }
 
+/// Rewrites link targets (links and link cards) the same way: `f` returns the
+/// new `href`, or `None` to keep it. Used to turn links between files into
+/// page links on import and back on export.
+pub fn map_link_hrefs(md: &str, mut f: impl FnMut(&str) -> Option<String>) -> String {
+    fn href(attrs: &mut crate::schema::Attrs, f: &mut dyn FnMut(&str) -> Option<String>) {
+        let old = match attrs.get("href") {
+            Some(yrs::Any::String(s)) => s.to_string(),
+            _ => return,
+        };
+        if let Some(next) = f(&old) {
+            attrs.insert("href".into(), crate::schema::s(&next));
+        }
+    }
+    fn walk(n: &mut crate::schema::PNode, f: &mut dyn FnMut(&str) -> Option<String>) {
+        match n {
+            crate::schema::PNode::Text { marks, .. } => {
+                for m in marks
+                    .iter_mut()
+                    .filter(|m| m.name == crate::schema::mark::LINK)
+                {
+                    href(&mut m.attrs, f);
+                }
+            }
+            crate::schema::PNode::Element {
+                name,
+                attrs,
+                children,
+            } => {
+                if name == crate::schema::node::LINK_CARD {
+                    href(attrs, f);
+                }
+                for c in children {
+                    walk(c, f);
+                }
+            }
+        }
+    }
+    let mut doc = markdown_to_pnode(md);
+    walk(&mut doc, &mut f);
+    pnode_to_markdown(&doc)
+}
+
 /// Renders markdown to sanitized HTML (raw HTML is escaped).
 pub fn markdown_to_html(md: &str) -> String {
     let mut o = parse::options();

@@ -12,6 +12,7 @@ mod pdf;
 mod remote;
 mod search;
 mod sync;
+mod transfer;
 
 use std::sync::{Arc, Mutex};
 
@@ -187,6 +188,8 @@ pub fn run() {
         commands::page_import_markdown,
         commands::page_export_file,
         commands::page_import_file,
+        commands::workspace_import,
+        commands::workspace_export,
         commands::page_print_data,
         commands::search_pages,
         commands::page_backlinks,
@@ -232,6 +235,8 @@ pub fn run() {
         commands::page_import_markdown,
         commands::page_export_file,
         commands::page_import_file,
+        commands::workspace_import,
+        commands::workspace_export,
         commands::page_print_data,
         commands::search_pages,
         commands::page_backlinks,

@@ -15,6 +15,7 @@ use crate::error::{Error, Result};
 use crate::hub::{DocEvent, DocHub, ORIGIN_LOCAL};
 use crate::remote::{ApiToken, Member, Remote, RemoteWorkspace, Share, normalize_server};
 use crate::sync::SyncManager;
+use crate::transfer;
 
 pub struct AppState {
     pub hub: Arc<DocHub>,
@@ -687,7 +688,7 @@ fn import_assets(state: &AppState, workspace_id: &str, dir: &std::path::Path, md
 
 /// Rewrites relative image paths that point at a readable file under `dir`
 /// with whatever `store` returns for the file's bytes.
-fn relink_local_images(
+pub(crate) fn relink_local_images(
     md: &str,
     dir: &std::path::Path,
     mut store: impl FnMut(&[u8]) -> Option<String>,
@@ -730,24 +731,119 @@ pub async fn page_import_file(
     Ok(Some(page))
 }
 
-/// A page title as a file name: path separators and reserved characters become dashes.
-fn file_name(title: &str) -> String {
-    let name: String = title
-        .chars()
-        .map(|c| {
-            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
-                '-'
-            } else {
-                c
-            }
-        })
-        .collect();
-    let name = name.trim();
+/// A page title as a file name: path separators, reserved and control characters
+/// become dashes, leading dots (hidden files) and trailing ones go, and long
+/// titles are cut to fit file system limits.
+pub(crate) fn file_name(title: &str) -> String {
+    let mut name = String::new();
+    for c in title.chars() {
+        if name.len() + c.len_utf8() > 200 {
+            break;
+        }
+        if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+            name.push('-');
+        } else {
+            name.push(c);
+        }
+    }
+    let name = name.trim().trim_matches('.').trim();
     if name.is_empty() {
         "Untitled".into()
     } else {
         name.into()
     }
+}
+
+// ---------------------------------------------------- workspace import/export
+
+const IMPORT_FOLDER: &str = "Folder…";
+const IMPORT_ZIP: &str = "Zip file…";
+
+/// Imports an Obsidian vault or a Notion export (a folder, or the .zip Notion
+/// sends) as pages under `parent` ("" = top level), picked in native dialogs
+/// run here. Returns None if cancelled.
+#[tauri::command]
+pub async fn workspace_import(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+    parent: String,
+) -> Result<Option<transfer::Imported>> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogResult};
+    let choice = app
+        .dialog()
+        .message("Pick the vault or export folder, or the .zip file Notion sent you.")
+        .title("Import Notion or Obsidian")
+        .buttons(MessageDialogButtons::YesNoCancelCustom(
+            IMPORT_FOLDER.into(),
+            IMPORT_ZIP.into(),
+            "Cancel".into(),
+        ))
+        .blocking_show_with_result();
+    let picked = match choice {
+        MessageDialogResult::Custom(c) if c == IMPORT_FOLDER => {
+            app.dialog().file().blocking_pick_folder()
+        }
+        MessageDialogResult::Custom(c) if c == IMPORT_ZIP => app
+            .dialog()
+            .file()
+            .add_filter("Zip", &["zip"])
+            .blocking_pick_file(),
+        _ => None,
+    };
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| Error::msg(e.to_string()))?;
+    let ws = state.hub.get_or_load(&workspace_id, &workspace_id)?;
+    let imported = transfer::import(&ws, &parent, &path, |page, dir, md| {
+        let md = import_assets(&state, &workspace_id, dir, md);
+        let doc = state.hub.get_or_load(page, &workspace_id)?;
+        markdown::set_markdown(&doc, &md, ORIGIN_LOCAL);
+        Ok(())
+    })?;
+    state.sync.subscribe_all(&workspace_id);
+    tauri::async_runtime::spawn(assets::flush(app, workspace_id));
+    Ok(Some(imported))
+}
+
+/// Exports every live page into a new folder inside one picked in a native
+/// dialog: `Title.md` per page, sub-pages in `Title/`, images in `_assets/`.
+/// Returns the folder written, or None if cancelled.
+#[tauri::command]
+pub async fn workspace_export(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let Some(picked) = app.dialog().file().blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let dest = picked.into_path().map_err(|e| Error::msg(e.to_string()))?;
+    let ws = state.hub.get_or_load(&workspace_id, &workspace_id)?;
+    let mut pages = Vec::new();
+    for page in workspace::live_pages(&ws) {
+        let doc = state.hub.get_or_load(&page.id, &workspace_id)?;
+        pages.push((page, markdown::doc_to_markdown(&doc)));
+    }
+    let name = file_name(&workspace::workspace_name(&ws));
+    let root = dest.join(transfer::dedupe(&name, |n| dest.join(n).exists()));
+    let mut saved = std::collections::HashSet::new();
+    for (ws_id, name) in pages.iter().flat_map(|(_, md)| transfer::asset_refs(md)) {
+        if saved.contains(&name) {
+            continue;
+        }
+        // An image that can't be fetched now keeps its kawruh-asset:// link.
+        if let Ok(Some((_, bytes))) = assets::load(&app, &ws_id, &name).await {
+            let dir = root.join(transfer::ASSETS_DIR);
+            std::fs::create_dir_all(&dir).map_err(|e| Error::msg(e.to_string()))?;
+            std::fs::write(dir.join(&name), bytes).map_err(|e| Error::msg(e.to_string()))?;
+            saved.insert(name);
+        }
+    }
+    transfer::export(&root, &pages, &saved)?;
+    Ok(Some(root.display().to_string()))
 }
 
 // ------------------------------------------------------------------------ PDF
@@ -1002,6 +1098,8 @@ mod tests {
     fn titles_become_safe_file_names() {
         assert_eq!(file_name("Q4: plan / v2?"), "Q4- plan - v2-");
         assert_eq!(file_name("   "), "Untitled");
+        assert_eq!(file_name(".env notes."), "env notes");
+        assert_eq!(file_name(&"é".repeat(300)).len(), 200);
     }
 
     #[test]

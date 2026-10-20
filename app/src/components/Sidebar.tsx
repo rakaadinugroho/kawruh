@@ -2,6 +2,7 @@ import {
   Check,
   ChevronsUpDown,
   CloudDownload,
+  Download,
   LayoutTemplate,
   PanelLeftClose,
   Plus,
@@ -9,10 +10,11 @@ import {
   Settings,
   SquarePen,
   Trash2,
+  Upload,
 } from 'lucide-react'
 import type { DocHandle } from '../lib/docs'
 import type { WorkspaceView } from '../lib/hooks'
-import type { SyncState, WorkspaceInfo } from '../lib/ipc'
+import { type SyncState, type WorkspaceInfo, api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
 import { createPage } from '../lib/workspace'
 import { key, thisDevice } from '../lib/platform'
@@ -88,10 +90,33 @@ export function StatusLine({ ws }: { ws: WorkspaceInfo }) {
 }
 
 export function Sidebar({ handle, view }: { handle: DocHandle | null; view: WorkspaceView }) {
-  const { workspaces, pageId, selectWorkspace, openPage, setDialog, toggleSidebar } = useApp()
+  const { workspaces, pageId, selectWorkspace, openPage, setDialog, toggleSidebar, toast, fail } =
+    useApp()
   const ws = useApp(currentWorkspace)
   const switcher = useMenuAnchor()
   const readonly = ws?.role === 'viewer'
+
+  const importNotes = async () => {
+    if (!ws) return
+    try {
+      const res = await api.importWorkspace(ws.id, '')
+      if (!res) return
+      if (res.root) openPage(res.root)
+      toast(`Imported ${res.pages} ${res.pages === 1 ? 'page' : 'pages'}`)
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  const exportAll = async () => {
+    if (!ws) return
+    try {
+      const path = await api.exportWorkspace(ws.id)
+      if (path) toast(`Exported to ${path}`)
+    } catch (e) {
+      fail(e)
+    }
+  }
 
   const switchItems: MenuItem[] = [
     ...workspaces.map((w) => ({
@@ -100,6 +125,19 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
       icon: w.id === ws?.id ? <Check size={14} /> : undefined,
       onSelect: () => selectWorkspace(w.id),
     })),
+    'separator',
+    {
+      label: 'Import Notion or Obsidian…',
+      icon: <Upload size={14} />,
+      disabled: !ws || readonly,
+      onSelect: importNotes,
+    },
+    {
+      label: 'Export workspace…',
+      icon: <Download size={14} />,
+      disabled: !ws,
+      onSelect: exportAll,
+    },
     'separator',
     {
       label: 'New workspace…',
