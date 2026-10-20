@@ -43,7 +43,10 @@ export type PrintPage = {
   links: Record<string, string>
 }
 
-export type RemoteWorkspace = { id: string; name: string; role: Role; attached: boolean }
+/// What workspace_import created; `root` is the first page.
+export type Imported = { pages: number; root: string | null }
+
+export type RemoteWorkspace ={ id: string; name: string; role: Role; attached: boolean }
 export type Member = { userId: string; username: string; displayName: string; role: Role }
 export type Share = { token: string; pageId: string; url: string; createdAt?: number | null }
 export type ApiToken = {
@@ -124,6 +127,14 @@ export const api = {
   /// Native open dialog + import as a sub-page. Returns the new page id.
   importFile: (workspaceId: string, parent: string) =>
     invoke<string | null>('page_import_file', { workspaceId, parent }),
+  /// Native dialogs + import of a Notion export or Obsidian vault (folder or
+  /// .zip) under `parent` ('' = top level). Null when cancelled.
+  importWorkspace: (workspaceId: string, parent: string) =>
+    invoke<Imported | null>('workspace_import', { workspaceId, parent }),
+  /// Native folder picker + export of every page as folders of markdown.
+  /// Returns the folder written; null when cancelled.
+  exportWorkspace: (workspaceId: string) =>
+    invoke<string | null>('workspace_export', { workspaceId }),
 
   /// Stores pasted image bytes; returns the `kawruh-asset://` src for the page.
   assetPut: (workspaceId: string, bytes: Uint8Array, mime: string) =>

@@ -9,6 +9,7 @@ mod linkmeta;
 mod pdf;
 mod remote;
 mod sync;
+mod transfer;
 
 use std::sync::{Arc, Mutex};
 
@@ -139,6 +140,8 @@ pub fn run() {
         commands::page_import_markdown,
         commands::page_export_file,
         commands::page_import_file,
+        commands::workspace_import,
+        commands::workspace_export,
         commands::page_print_data,
         commands::page_export_pdf,
         commands::asset_put,
@@ -176,6 +179,8 @@ pub fn run() {
         commands::page_import_markdown,
         commands::page_export_file,
         commands::page_import_file,
+        commands::workspace_import,
+        commands::workspace_export,
         commands::page_print_data,
         commands::page_export_pdf,
         commands::asset_put,
