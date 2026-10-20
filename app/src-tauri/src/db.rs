@@ -8,6 +8,7 @@ use crate::error::Result;
 pub fn migrate(conn: &Connection) -> Result<()> {
     kawruh_core::store::migrate(conn)?;
     crate::assets::migrate(conn)?;
+    crate::history::migrate(conn)?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS accounts (
             id TEXT PRIMARY KEY,

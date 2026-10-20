@@ -19,6 +19,8 @@ use crate::sync::SyncManager;
 pub struct AppState {
     pub hub: Arc<DocHub>,
     pub sync: Arc<SyncManager>,
+    pub search: Arc<crate::search::SearchIndex>,
+    pub history: Arc<crate::history::History>,
     pub remote: Remote,
     pub data_dir: std::path::PathBuf,
 }
@@ -272,6 +274,7 @@ pub async fn account_login(
     password: String,
     register: bool,
     display_name: Option<String>,
+    invite: Option<String>,
 ) -> Result<Account> {
     let server = normalize_server(&server_url);
     let res = state
@@ -282,6 +285,7 @@ pub async fn account_login(
             &password,
             register,
             display_name.as_deref(),
+            invite.as_deref(),
         )
         .await?;
     let account = db::upsert_account(
@@ -412,6 +416,16 @@ pub async fn tokens_list(state: State<'_, AppState>, account_id: String) -> Resu
     state.remote.tokens(&a.server_url, &a.token).await
 }
 
+/// An invite code for this account's server, for someone to sign up with.
+#[tauri::command]
+pub async fn invite_create(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<crate::remote::Invite> {
+    let a = state.account(&account_id)?;
+    state.remote.create_invite(&a.server_url, &a.token).await
+}
+
 #[tauri::command]
 pub async fn token_create(
     state: State<'_, AppState>,
@@ -456,6 +470,10 @@ pub fn doc_open(
     let (view, bytes) = state.hub.open_view(&doc_id, &workspace_id, channel)?;
     // A page created on this device must start syncing right away.
     state.sync.subscribe_all(&workspace_id);
+    if doc_id != workspace_id {
+        // How the page looked when opened, before this session's edits.
+        crate::snapshot_if_due(&state.hub, &state.history, &workspace_id, &doc_id);
+    }
     Ok(Opened {
         view,
         state: B64.encode(bytes),
@@ -520,13 +538,67 @@ pub fn page_import_markdown(
     title: String,
     markdown_text: String,
 ) -> Result<String> {
-    let (title, body) = split_title(&title, &markdown_text);
-    let ws = state.hub.get_or_load(&workspace_id, &workspace_id)?;
-    let page = workspace::create_page(&ws, &title, &parent, ORIGIN_LOCAL)?;
-    let doc = state.hub.get_or_load(&page, &workspace_id)?;
+    import_markdown(&state, &workspace_id, &parent, &title, &markdown_text)
+}
+
+fn import_markdown(
+    state: &AppState,
+    workspace_id: &str,
+    parent: &str,
+    title: &str,
+    markdown_text: &str,
+) -> Result<String> {
+    let (title, body) = split_title(title, markdown_text);
+    let ws = state.hub.get_or_load(workspace_id, workspace_id)?;
+    let page = workspace::create_page(&ws, &title, parent, ORIGIN_LOCAL)?;
+    let doc = state.hub.get_or_load(&page, workspace_id)?;
     markdown::set_markdown(&doc, body, ORIGIN_LOCAL);
-    state.sync.subscribe_all(&workspace_id);
+    state.sync.subscribe_all(workspace_id);
     Ok(page)
+}
+
+/// Imports one markdown file as a page, with the images beside it.
+fn import_md_file(
+    state: &AppState,
+    workspace_id: &str,
+    parent: &str,
+    path: &std::path::Path,
+) -> Result<String> {
+    let text = std::fs::read_to_string(path).map_err(|e| Error::msg(e.to_string()))?;
+    let name = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Imported".into());
+    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let text = import_assets(state, workspace_id, dir, &text);
+    import_markdown(state, workspace_id, parent, &name, &text)
+}
+
+/// How many opened files wait for a workspace to go into.
+#[tauri::command]
+pub fn pending_files(app: tauri::AppHandle) -> usize {
+    crate::opened::count(&app)
+}
+
+/// Imports the markdown files opened with Kawruh (see opened.rs) as top-level
+/// pages of `workspace_id`. Returns their ids.
+#[tauri::command]
+pub fn open_pending_files(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<String>> {
+    let mut pages = Vec::new();
+    for path in crate::opened::take(&app) {
+        match import_md_file(&state, &workspace_id, "", &path) {
+            Ok(page) => pages.push(page),
+            Err(e) => tracing::warn!("opening {}: {e}", path.display()),
+        }
+    }
+    if !pages.is_empty() {
+        tauri::async_runtime::spawn(assets::flush(app, workspace_id));
+    }
+    Ok(pages)
 }
 
 fn split_title<'a>(fallback: &str, md: &'a str) -> (String, &'a str) {
@@ -653,14 +725,7 @@ pub async fn page_import_file(
         return Ok(None);
     };
     let path = picked.into_path().map_err(|e| Error::msg(e.to_string()))?;
-    let text = std::fs::read_to_string(&path).map_err(|e| Error::msg(e.to_string()))?;
-    let name = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "Imported".into());
-    let dir = path.parent().unwrap_or(std::path::Path::new("."));
-    let text = import_assets(&state, &workspace_id, dir, &text);
-    let page = page_import_markdown(state, workspace_id.clone(), parent, name, text)?;
+    let page = import_md_file(&state, &workspace_id, &parent, &path)?;
     tauri::async_runtime::spawn(assets::flush(app, workspace_id));
     Ok(Some(page))
 }
@@ -796,6 +861,61 @@ pub async fn page_export_pdf(app: tauri::AppHandle, title: String) -> Result<Opt
         crate::pdf::print_to_pdf(&app, std::path::Path::new("")).await?;
         Ok(None)
     }
+}
+
+// ----------------------------------------------------- search, links, history
+
+#[tauri::command]
+pub fn search_pages(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    query: String,
+) -> Result<Vec<crate::search::SearchHit>> {
+    state.search.search(&state.hub, &workspace_id, &query, 30)
+}
+
+/// Pages that link to `page_id` with `[…](kawruh://page/<id>)`.
+#[tauri::command]
+pub fn page_backlinks(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    page_id: String,
+) -> Result<Vec<crate::search::PageRef>> {
+    state.search.backlinks(&state.hub, &workspace_id, &page_id)
+}
+
+#[tauri::command]
+pub fn page_history(
+    state: State<'_, AppState>,
+    page_id: String,
+) -> Result<Vec<crate::history::Entry>> {
+    crate::history::list(&state.db(), &page_id)
+}
+
+#[tauri::command]
+pub fn page_history_get(state: State<'_, AppState>, page_id: String, id: i64) -> Result<String> {
+    crate::history::get(&state.db(), &page_id, id)?
+        .ok_or_else(|| Error::msg("that version is gone"))
+}
+
+/// Replaces the page with an earlier version. What's there now is saved first,
+/// so a restore can itself be undone from the history.
+#[tauri::command]
+pub fn page_history_restore(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    page_id: String,
+    id: i64,
+) -> Result<()> {
+    let markdown_text = crate::history::get(&state.db(), &page_id, id)?
+        .ok_or_else(|| Error::msg("that version is gone"))?;
+    let doc = state.hub.get_or_load(&page_id, &workspace_id)?;
+    let current = markdown::doc_to_markdown(&doc);
+    state
+        .history
+        .snapshot(&state.db(), &page_id, &current, workspace::now_ms())?;
+    markdown::set_markdown(&doc, &markdown_text, ORIGIN_LOCAL);
+    Ok(())
 }
 
 // -------------------------------------------------------------- images, links

@@ -79,6 +79,14 @@ async fn remote_error(res: reqwest::Response) -> Error {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Invite {
+    pub code: String,
+    #[serde(default, alias = "expires_at")]
+    pub expires_at: Option<i64>,
+}
+
 pub fn normalize_server(url: &str) -> String {
     let url = url.trim().trim_end_matches('/');
     if url.starts_with("http://") || url.starts_with("https://") {
@@ -181,6 +189,7 @@ impl Remote {
         password: &str,
         register: bool,
         display_name: Option<&str>,
+        invite: Option<&str>,
     ) -> Result<AuthResponse> {
         let path = if register {
             "/api/auth/register"
@@ -190,6 +199,9 @@ impl Remote {
         let mut body = json!({ "username": username, "password": password });
         if let Some(d) = display_name.filter(|d| !d.trim().is_empty()) {
             body["display_name"] = json!(d.trim());
+        }
+        if let Some(code) = invite.filter(|c| !c.trim().is_empty()) {
+            body["invite"] = json!(code.trim().to_uppercase());
         }
         self.call(Method::POST, server, path, None, Some(body))
             .await
@@ -309,6 +321,12 @@ impl Remote {
             None,
         )
         .await
+    }
+
+    /// A single-use code that lets someone create an account (valid 7 days).
+    pub async fn create_invite(&self, server: &str, token: &str) -> Result<Invite> {
+        self.call(Method::POST, server, "/api/invites", Some(token), None)
+            .await
     }
 
     pub async fn tokens(&self, server: &str, token: &str) -> Result<Vec<ApiToken>> {

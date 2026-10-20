@@ -17,3 +17,4 @@ app/tsconfig.tsbuildinfo
 
 # Claude Code session files
 .claude/*.lock
+.claude/worktrees/

@@ -2,6 +2,7 @@ import {
   Check,
   ChevronsUpDown,
   CloudDownload,
+  LayoutTemplate,
   PanelLeftClose,
   Plus,
   Search,
@@ -17,6 +18,32 @@ import { createPage } from '../lib/workspace'
 import { key, thisDevice } from '../lib/platform'
 import { PageTree } from './PageTree'
 import { IconButton, Kbd, Menu, type MenuItem, useMenuAnchor } from './ui'
+
+/// Offers a downloaded-and-verified restart into a newer release.
+function UpdateBanner() {
+  const update = useApp((s) => s.update)
+  const applyUpdate = useApp((s) => s.applyUpdate)
+  if (update.kind !== 'available' && update.kind !== 'installing') return null
+  const installing = update.kind === 'installing'
+  return (
+    <div className="mb-1 flex items-center gap-2 rounded-md bg-accent-soft px-2.5 py-2 text-[12px]">
+      <span className="min-w-0 flex-1 text-ink">
+        {installing
+          ? `Updating${update.percent === null ? '…' : ` ${update.percent}%`}`
+          : `Kawruh ${update.version} is ready`}
+      </span>
+      {!installing && (
+        <button
+          type="button"
+          onClick={() => void applyUpdate()}
+          className="press shrink-0 rounded-[5px] bg-accent px-2 py-1 text-[11px] font-medium text-accent-ink"
+        >
+          Restart to update
+        </button>
+      )}
+    </div>
+  )
+}
 
 const statusCopy: Record<SyncState, string> = {
   local: `On ${thisDevice} only`,
@@ -142,6 +169,17 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
             <Kbd>{key('N')}</Kbd>
           </button>
         )}
+        {!readonly && (
+          <button
+            type="button"
+            onClick={() => setDialog({ kind: 'templates' })}
+            disabled={!handle}
+            className="press flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] text-ink-2 hover:bg-hover"
+          >
+            <LayoutTemplate size={14} className="text-ink-3" />
+            <span className="flex-1 text-left">From template…</span>
+          </button>
+        )}
       </div>
 
       <div className="mt-4 flex items-center justify-between px-4 pb-1">
@@ -162,6 +200,7 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
       </div>
 
       <div className="flex shrink-0 flex-col gap-1 border-t border-line px-2 py-2">
+        <UpdateBanner />
         <button
           type="button"
           onClick={() => setDialog({ kind: 'trash' })}

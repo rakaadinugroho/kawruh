@@ -430,6 +430,32 @@ button {
   }
 }
 
+/* Links to other pages (kawruh://page/…): quieter than web links, with a page glyph. */
+.milkdown .ProseMirror a[href^='kawruh://page/'] {
+  color: var(--ink);
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.milkdown .ProseMirror a[href^='kawruh://page/']:hover {
+  background: var(--hover);
+  border-bottom-color: var(--ink-3);
+}
+.milkdown .ProseMirror a[href^='kawruh://page/']::before {
+  content: '';
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.22em;
+  vertical-align: -0.04em;
+  background: currentColor;
+  opacity: 0.5;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 3v5h5'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 3v5h5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
 /* Mermaid previews inside code blocks. */
 .kw-mermaid {
   display: flex;
@@ -510,6 +536,74 @@ button {
   .kw-canvas-preview img {
     filter: invert(0.88) hue-rotate(180deg);
   }
+}
+
+/* Read-only page rendering (page history preview). */
+.kw-preview {
+  font-family: var(--doc-font);
+  font-size: calc(var(--doc-size) * 0.9);
+  line-height: 1.6;
+  color: var(--ink);
+}
+.kw-preview h1,
+.kw-preview h2,
+.kw-preview h3 {
+  margin: 1em 0 0.4em;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.kw-preview h1 {
+  font-size: 1.6em;
+}
+.kw-preview h2 {
+  font-size: 1.35em;
+}
+.kw-preview h3 {
+  font-size: 1.15em;
+}
+.kw-preview > :first-child > :first-child {
+  margin-top: 0;
+}
+.kw-preview p {
+  margin: 0.5em 0;
+}
+.kw-preview ul,
+.kw-preview ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+  list-style: revert;
+}
+.kw-preview li > p {
+  display: inline;
+}
+.kw-preview blockquote {
+  margin: 0.6em 0;
+  padding-left: 0.9em;
+  border-left: 3px solid var(--line);
+  color: var(--ink-2);
+}
+.kw-preview pre {
+  margin: 0.6em 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--hover);
+  font: 0.85em/1.5 var(--font-mono);
+  white-space: pre-wrap;
+}
+.kw-preview img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+}
+.kw-preview a {
+  color: var(--accent);
+}
+.kw-preview table {
+  border-collapse: collapse;
+}
+.kw-preview th,
+.kw-preview td {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
 }
 
 /* ---------------------------------------------------------------- print (PDF export) */
@@ -596,6 +690,10 @@ button {
   }
   .kw-print-body a {
     color: var(--accent);
+  }
+  .kw-print-body a[href^='kawruh://page/'] {
+    color: inherit;
+    text-decoration: none;
   }
   .kw-print-body ul,
   .kw-print-body ol {

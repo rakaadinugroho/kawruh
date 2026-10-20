@@ -7,11 +7,13 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { ShareDialog } from './components/ShareDialog'
 import { Sidebar } from './components/Sidebar'
 import { Toasts } from './components/Toasts'
+import { TemplatesDialog } from './components/TemplatesDialog'
 import { TrashDialog } from './components/TrashDialog'
 import { JoinDialog, NewWorkspaceDialog } from './components/WorkspaceDialogs'
 import { useDoc, useWorkspaceView } from './lib/hooks'
 import { type SyncState, api } from './lib/ipc'
 import { parseAppearance } from './lib/appearance'
+import { CHECK_EVERY_MS } from './lib/updater'
 import { currentWorkspace, useApp } from './lib/store'
 import { createPage } from './lib/workspace'
 
@@ -57,6 +59,48 @@ export default function App() {
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Markdown files opened with Kawruh (Finder, file association, command line)
+  // become pages of the current workspace, or of a new local one.
+  useEffect(() => {
+    if (!loaded) return
+    const take = async () => {
+      try {
+        if ((await api.pendingFiles()) === 0) return
+        let id = useApp.getState().workspaceId
+        if (!id) {
+          const created = await api.createWorkspace('Notes', null)
+          await refresh()
+          useApp.getState().selectWorkspace(created.id)
+          id = created.id
+        }
+        const pages = await api.openPendingFiles(id as string)
+        if (pages.length) {
+          openPage(pages[pages.length - 1])
+          toast(pages.length === 1 ? 'Opened as a page' : `Opened ${pages.length} files as pages`)
+        }
+      } catch (e) {
+        fail(e)
+      }
+    }
+    void take()
+    const off = listen('files-opened', () => void take())
+    return () => {
+      off.then((f) => f())
+    }
+  }, [loaded, refresh, openPage, toast, fail])
+
+  // Updates: shortly after launch, then every few hours (not in dev builds).
+  useEffect(() => {
+    if (import.meta.env.DEV) return
+    const run = () => void useApp.getState().checkForUpdate()
+    const first = setTimeout(run, 5000)
+    const every = setInterval(run, CHECK_EVERY_MS)
+    return () => {
+      clearTimeout(first)
+      clearInterval(every)
+    }
   }, [])
 
   // Reopen the page last viewed in this workspace.
@@ -138,6 +182,7 @@ export default function App() {
       <QuickSwitcher
         open={dialog?.kind === 'quick'}
         onClose={close}
+        workspaceId={workspaceId}
         doc={wsHandle?.doc ?? null}
         all={view.all}
         live={view.live}
@@ -159,6 +204,13 @@ export default function App() {
         trash={view.trash}
         readonly={readonly}
         onOpen={(id) => openPage(id)}
+      />
+      <TemplatesDialog
+        open={dialog?.kind === 'templates'}
+        onClose={close}
+        workspaceId={workspaceId}
+        wsHandle={wsHandle}
+        live={view.live}
       />
       <Toasts />
     </>

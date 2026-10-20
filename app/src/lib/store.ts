@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { type Appearance, applyAppearance, cachedAppearance } from './appearance'
 import { closeWorkspaceDocs } from './docs'
+import { type UpdateState, findUpdate, installUpdate } from './updater'
 import { type Account, type WorkspaceInfo, api, errorMessage } from './ipc'
 
 export type DialogName =
@@ -11,6 +12,7 @@ export type DialogName =
   | { kind: 'share' }
   | { kind: 'quick' }
   | { kind: 'trash' }
+  | { kind: 'templates' }
 
 type Toast = { id: number; text: string; tone: 'info' | 'error' }
 
@@ -24,6 +26,7 @@ type State = {
   toasts: Toast[]
   loaded: boolean
   appearance: Appearance
+  update: UpdateState
 
   refresh: () => Promise<void>
   selectWorkspace: (id: string) => void
@@ -36,6 +39,10 @@ type State = {
   forgetWorkspace: (id: string) => Promise<void>
   /// Applies a page font/size change; `save` keeps it for next time.
   setAppearance: (patch: Partial<Appearance>, save?: boolean) => void
+  /// Looks for a newer release; `manual` reports "up to date" and errors.
+  checkForUpdate: (manual?: boolean) => Promise<void>
+  /// Installs the found update and restarts.
+  applyUpdate: () => Promise<void>
 }
 
 let toastId = 0
@@ -52,6 +59,7 @@ export const useApp = create<State>((set, get) => ({
   toasts: [],
   loaded: false,
   appearance: cachedAppearance(),
+  update: { kind: 'idle' },
 
   refresh: async () => {
     const [workspaces, accounts] = await Promise.all([api.workspaces(), api.accounts()])
@@ -94,6 +102,33 @@ export const useApp = create<State>((set, get) => ({
     await api.forgetWorkspace(id)
     set({ workspaceId: null, pageId: null })
     await get().refresh()
+  },
+
+  checkForUpdate: async (manual = false) => {
+    const { kind } = get().update
+    if (kind === 'checking' || kind === 'installing') return
+    set({ update: { kind: 'checking' } })
+    try {
+      const version = await findUpdate()
+      set({ update: version ? { kind: 'available', version } : { kind: 'current' } })
+      if (manual && !version) get().toast("You're on the latest version.")
+    } catch (e) {
+      set({ update: { kind: 'idle' } })
+      if (manual) get().fail(e)
+    }
+  },
+
+  applyUpdate: async () => {
+    const current = get().update
+    if (current.kind !== 'available') return
+    const { version } = current
+    set({ update: { kind: 'installing', version, percent: null } })
+    try {
+      await installUpdate((percent) => set({ update: { kind: 'installing', version, percent } }))
+    } catch (e) {
+      set({ update: { kind: 'available', version } })
+      get().fail(e)
+    }
   },
 
   setAppearance: (patch, save = true) => {

@@ -78,6 +78,11 @@ async function body(page: PrintPage): Promise<HTMLElement> {
   return out
 }
 
+/// A read-only rendering of markdown (page history previews).
+export function renderMarkdown(markdown: string): Promise<HTMLElement> {
+  return body({ id: '', title: '', icon: '', depth: 0, markdown, canvases: {}, links: {} })
+}
+
 /// Builds the print layout for `pages` (first one is the exported page) and
 /// waits until its images are ready. Remove the returned element afterwards.
 export async function preparePrint(pages: PrintPage[]): Promise<HTMLElement> {

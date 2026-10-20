@@ -1,7 +1,8 @@
-import { codeBlockSchema, imageSchema, paragraphSchema } from '@milkdown/kit/preset/commonmark'
+import { codeBlockSchema, imageSchema, linkSchema, paragraphSchema } from '@milkdown/kit/preset/commonmark'
 import type { MarkdownNode } from '@milkdown/kit/transformer'
 import { $nodeSchema } from '@milkdown/kit/utils'
 import { canonicalSrc, displaySrc } from './assets'
+import { pageIdOf } from './page-link'
 
 /// Fenced-code language used to persist a canvas block in markdown:
 /// ```kawruh-canvas\n<canvas id>\n```
@@ -165,10 +166,25 @@ export const imageWithAssets = imageSchema.extendSchema((prev) => (ctx) => {
   }
 })
 
+/// Links to other pages (`kawruh://page/<id>`) survive Milkdown's href
+/// sanitizer, and typing at the end of any link no longer extends it.
+export const linkWithPageLinks = linkSchema.extendSchema((prev) => (ctx) => {
+  const base = prev(ctx)
+  return {
+    ...base,
+    inclusive: false,
+    toDOM: (mark) => {
+      const [tag, attrs] = base.toDOM!(mark, true) as [string, Record<string, unknown>]
+      return pageIdOf(mark.attrs.href) ? [tag, { ...attrs, href: mark.attrs.href }] : [tag, attrs]
+    },
+  }
+})
+
 export const kawruhSchema = [
   codeBlockWithoutCanvas,
   canvasSchema,
   paragraphWithoutCards,
   linkCardSchema,
   imageWithAssets,
+  linkWithPageLinks,
 ].flat()

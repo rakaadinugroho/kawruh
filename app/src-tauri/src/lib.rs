@@ -4,10 +4,13 @@ mod db;
 #[cfg(debug_assertions)]
 mod e2e;
 mod error;
+mod history;
 mod hub;
 mod linkmeta;
+mod opened;
 mod pdf;
 mod remote;
+mod search;
 mod sync;
 
 use std::sync::{Arc, Mutex};
@@ -25,11 +28,17 @@ async fn event_loop(
     app: tauri::AppHandle,
     hub: Arc<DocHub>,
     sync: Arc<SyncManager>,
+    search: Arc<search::SearchIndex>,
+    history: Arc<history::History>,
     mut rx: mpsc::UnboundedReceiver<HubEvent>,
 ) {
     use tauri::Emitter;
     while let Some(ev) = rx.recv().await {
         let routed = hub.route(&ev);
+        search.mark(&ev.doc_id);
+        if ev.doc_id != ev.workspace_id {
+            snapshot_if_due(&hub, &history, &ev.workspace_id, &ev.doc_id);
+        }
         if routed.to_server {
             sync.send_update(&ev.workspace_id, &ev.doc_id, ev.update.clone());
         }
@@ -46,6 +55,27 @@ async fn event_loop(
             // New pages in the tree start syncing as soon as they appear.
             sync.subscribe_all(&ev.workspace_id);
         }
+    }
+}
+
+/// Saves a page history snapshot when the page's last one is old enough.
+pub(crate) fn snapshot_if_due(
+    hub: &DocHub,
+    history: &history::History,
+    workspace_id: &str,
+    page_id: &str,
+) {
+    let now = workspace::now_ms();
+    let due = history.due(&hub.db.lock().unwrap(), page_id, now);
+    if !matches!(due, Ok(true)) {
+        return;
+    }
+    let Ok(doc) = hub.get_or_load(page_id, workspace_id) else {
+        return;
+    };
+    let markdown = kawruh_core::markdown::doc_to_markdown(&doc);
+    if let Err(e) = history.snapshot(&hub.db.lock().unwrap(), page_id, &markdown, now) {
+        tracing::warn!("page history for {page_id}: {e}");
     }
 }
 
@@ -69,8 +99,16 @@ pub fn run() {
         .try_init();
 
     let builder = tauri::Builder::default()
+        // First, so a second launch (e.g. opening a .md file) hands its
+        // arguments to the running app instead of starting another one.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            opened::queue(app, opened::from_args(&argv));
+        }))
+        .manage(opened::Opened::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .register_asynchronous_uri_scheme_protocol(assets::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let path = request.uri().path().to_string();
@@ -87,15 +125,21 @@ pub fn run() {
             let db = Arc::new(Mutex::new(conn));
             let (hub, rx) = DocHub::new(db);
             let sync = SyncManager::new(hub.clone(), app.handle().clone());
+            let search = Arc::new(search::SearchIndex::default());
+            let history = Arc::new(history::History::default());
             tauri::async_runtime::spawn(event_loop(
                 app.handle().clone(),
                 hub.clone(),
                 sync.clone(),
+                search.clone(),
+                history.clone(),
                 rx,
             ));
             app.manage(AppState {
                 hub,
                 sync,
+                search,
+                history,
                 remote: remote::Remote::new(),
                 data_dir: dir,
             });
@@ -107,6 +151,9 @@ pub fn run() {
             });
             #[cfg(debug_assertions)]
             e2e::start(app.handle().clone());
+            // Windows and Linux pass files opened with Kawruh as arguments.
+            let args: Vec<String> = std::env::args().collect();
+            opened::queue(app.handle(), opened::from_args(&args));
             Ok(())
         });
 
@@ -129,6 +176,7 @@ pub fn run() {
         commands::share_create,
         commands::share_delete,
         commands::tokens_list,
+        commands::invite_create,
         commands::token_create,
         commands::token_delete,
         commands::doc_open,
@@ -140,6 +188,13 @@ pub fn run() {
         commands::page_export_file,
         commands::page_import_file,
         commands::page_print_data,
+        commands::search_pages,
+        commands::page_backlinks,
+        commands::page_history,
+        commands::page_history_get,
+        commands::page_history_restore,
+        commands::open_pending_files,
+        commands::pending_files,
         commands::page_export_pdf,
         commands::asset_put,
         commands::link_preview,
@@ -166,6 +221,7 @@ pub fn run() {
         commands::share_create,
         commands::share_delete,
         commands::tokens_list,
+        commands::invite_create,
         commands::token_create,
         commands::token_delete,
         commands::doc_open,
@@ -177,6 +233,13 @@ pub fn run() {
         commands::page_export_file,
         commands::page_import_file,
         commands::page_print_data,
+        commands::search_pages,
+        commands::page_backlinks,
+        commands::page_history,
+        commands::page_history_get,
+        commands::page_history_restore,
+        commands::open_pending_files,
+        commands::pending_files,
         commands::page_export_pdf,
         commands::asset_put,
         commands::link_preview,
@@ -185,6 +248,15 @@ pub fn run() {
     ]);
 
     builder
-        .run(tauri::generate_context!())
-        .expect("error while running Kawruh");
+        .build(tauri::generate_context!())
+        .expect("error while building Kawruh")
+        .run(|app, event| {
+            // macOS hands over files opened with Kawruh as an event instead.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = event {
+                opened::queue(app, urls.into_iter().filter_map(|u| u.to_file_path().ok()));
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }

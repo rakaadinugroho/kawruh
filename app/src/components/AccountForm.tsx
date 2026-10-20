@@ -21,6 +21,7 @@ export function AccountForm({
   const [username, setUsername] = useState(initial?.username ?? '')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [invite, setInvite] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -35,6 +36,7 @@ export function AccountForm({
         password,
         register,
         displayName: register ? displayName : undefined,
+        invite: register ? invite : undefined,
       })
       await refresh()
       onDone(account)
@@ -52,7 +54,7 @@ export function AccountForm({
           className={inputClass}
           value={serverUrl}
           onChange={(e) => setServerUrl(e.target.value)}
-          placeholder="http://192.168.1.10:7420"
+          placeholder="https://notes.example.com"
           required
           name="server"
         />
@@ -90,6 +92,20 @@ export function AccountForm({
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             name="displayName"
+          />
+        </Field>
+      )}
+      {register && (
+        <Field label="Invite code" hint="Only needed if the server is invite-only. Ask someone who's already on it.">
+          <input
+            className={inputClass}
+            value={invite}
+            onChange={(e) => setInvite(e.target.value)}
+            placeholder="KWR-XXXX-XXXX"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            name="invite"
           />
         </Field>
       )}

@@ -1,4 +1,4 @@
-import { Copy, KeyRound, LogOut, Plus, Trash2 } from 'lucide-react'
+import { Copy, KeyRound, LogOut, Plus, Trash2, UserPlus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { DocFont, DocSize } from '../lib/appearance'
 import { type ApiToken, type AppInfo, api } from '../lib/ipc'
@@ -131,10 +131,20 @@ function AppearanceTab() {
 }
 
 function AccountsTab() {
-  const { accounts, refresh, fail } = useApp()
+  const { accounts, refresh, fail, toast } = useApp()
   const [adding, setAdding] = useState<null | { serverUrl?: string; username?: string }>(
     accounts.length === 0 ? {} : null
   )
+  const [invite, setInvite] = useState<{ accountId: string; code: string } | null>(null)
+
+  const makeInvite = async (accountId: string) => {
+    try {
+      const { code } = await api.inviteCreate(accountId)
+      setInvite({ accountId, code })
+    } catch (e) {
+      fail(e)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -151,6 +161,12 @@ function AccountsTab() {
                   {host(a.serverUrl)} · {a.loggedIn ? 'Logged in' : 'Logged out'}
                 </div>
               </div>
+              {a.loggedIn && (
+                <Button variant="ghost" className="h-7" onClick={() => void makeInvite(a.id)}>
+                  <UserPlus size={13} />
+                  Invite
+                </Button>
+              )}
               {a.loggedIn ? (
                 <Button
                   variant="ghost"
@@ -178,6 +194,28 @@ function AccountsTab() {
               )}
             </div>
           ))}
+        </div>
+      )}
+      {invite && (
+        <div className="rounded-lg bg-accent-soft p-3 text-[12px] text-ink-2">
+          <div className="flex items-center gap-2">
+            <code className="selectable flex-1 font-mono text-[14px] font-medium tracking-wide text-ink">
+              {invite.code}
+            </code>
+            <IconButton
+              label="Copy invite code"
+              onClick={() => {
+                copyText(invite.code)
+                toast('Invite code copied')
+              }}
+            >
+              <Copy size={14} />
+            </IconButton>
+          </div>
+          <p className="mt-1.5 leading-relaxed">
+            One person can use it within 7 days: in Kawruh they choose <b>Create an account</b> on{' '}
+            {host(accounts.find((a) => a.id === invite.accountId)?.serverUrl ?? '')} and enter this code.
+          </p>
         </div>
       )}
       {adding ? (
@@ -328,6 +366,9 @@ function TokensTab() {
 
 function AboutTab() {
   const [info, setInfo] = useState<AppInfo | null>(null)
+  const update = useApp((s) => s.update)
+  const checkForUpdate = useApp((s) => s.checkForUpdate)
+  const applyUpdate = useApp((s) => s.applyUpdate)
   useEffect(() => {
     api.appInfo().then(setInfo).catch(() => {})
   }, [])
@@ -341,6 +382,25 @@ function AboutTab() {
         Kawruh is Javanese for knowledge. Pages are markdown underneath, stored on {thisDevice} and
         synced to your server when a workspace is shared.
       </p>
+      <div className="flex items-center gap-3">
+        {update.kind === 'available' ? (
+          <Button variant="primary" onClick={() => void applyUpdate()}>
+            Restart to update to {update.version}
+          </Button>
+        ) : (
+          <Button
+            disabled={update.kind === 'checking' || update.kind === 'installing'}
+            onClick={() => void checkForUpdate(true)}
+          >
+            {update.kind === 'checking' ? 'Checking…' : 'Check for updates'}
+          </Button>
+        )}
+        {update.kind === 'installing' && (
+          <span className="text-[12px] text-ink-3">
+            Updating{update.percent === null ? '…' : ` ${update.percent}%`}
+          </span>
+        )}
+      </div>
       {info && (
         <p className="text-[12px] text-ink-3">
           Data folder: <code className="selectable font-mono">{info.dataDir}</code>

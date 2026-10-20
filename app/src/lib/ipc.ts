@@ -32,6 +32,10 @@ export type LinkMeta = {
   site?: string
 }
 
+export type SearchHit = { id: string; title: string; snippet: string; inTitle: boolean }
+export type PageRef = { id: string; title: string }
+export type HistoryEntry = { id: number; ts: number; preview: string }
+
 /// One page laid out for PDF export (see page_print_data).
 export type PrintPage = {
   id: string
@@ -85,7 +89,10 @@ export const api = {
     password: string
     register: boolean
     displayName?: string
+    invite?: string
   }) => invoke<Account>('account_login', args),
+  /// A single-use sign-up code for this account's server (valid 7 days).
+  inviteCreate: (accountId: string) => invoke<{ code: string }>('invite_create', { accountId }),
   logout: (accountId: string) => invoke<void>('account_logout', { accountId }),
 
   members: (workspaceId: string) => invoke<Member[]>('members_list', { workspaceId }),
@@ -132,6 +139,17 @@ export const api = {
     }),
   linkPreview: (url: string) => invoke<LinkMeta>('link_preview', { url }),
 
+  /// Imports the .md files opened with Kawruh into this workspace; their page ids.
+  openPendingFiles: (workspaceId: string) => invoke<string[]>('open_pending_files', { workspaceId }),
+  pendingFiles: () => invoke<number>('pending_files'),
+  searchPages: (workspaceId: string, query: string) =>
+    invoke<SearchHit[]>('search_pages', { workspaceId, query }),
+  pageBacklinks: (workspaceId: string, pageId: string) =>
+    invoke<PageRef[]>('page_backlinks', { workspaceId, pageId }),
+  pageHistory: (pageId: string) => invoke<HistoryEntry[]>('page_history', { pageId }),
+  pageHistoryGet: (pageId: string, id: number) => invoke<string>('page_history_get', { pageId, id }),
+  pageHistoryRestore: (workspaceId: string, pageId: string, id: number) =>
+    invoke<void>('page_history_restore', { workspaceId, pageId, id }),
   pagePrintData: (workspaceId: string, pageId: string, includeChildren: boolean) =>
     invoke<PrintPage[]>('page_print_data', { workspaceId, pageId, includeChildren }),
   /// Prints the prepared layout: a PDF via save dialog on macOS (its path), the

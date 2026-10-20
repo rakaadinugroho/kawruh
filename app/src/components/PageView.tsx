@@ -3,6 +3,7 @@ import {
   ClipboardCopy,
   Download,
   FileDown,
+  History,
   FilePlus2,
   FileText,
   MoreHorizontal,
@@ -16,9 +17,10 @@ import {
 } from 'lucide-react'
 import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Editor } from '../editor/Editor'
+import { HistoryDialog } from './HistoryDialog'
 import type { DocHandle } from '../lib/docs'
 import { type WorkspaceView, colorFor, useDoc, usePeers } from '../lib/hooks'
-import { api } from '../lib/ipc'
+import { type PageRef, api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
 import { isMac, key } from '../lib/platform'
 import {
@@ -139,6 +141,7 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
   const page = view.all.find((p) => p.id === pageId) ?? null
   const handle = useDoc(page ? page.id : null, ws?.id ?? null)
   const [canvasId, setCanvasId] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const more = useMenuAnchor()
   const iconMenu = useMenuAnchor()
   const readonly = ws?.role === 'viewer'
@@ -159,6 +162,26 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
   }, [handle, account])
 
   useEffect(() => setCanvasId(null), [pageId])
+
+  // Pages that link here; refreshed on open and every so often while open.
+  const [backlinks, setBacklinks] = useState<PageRef[]>([])
+  useEffect(() => {
+    setBacklinks([])
+    if (!ws || !page) return
+    let stale = false
+    const load = () =>
+      api
+        .pageBacklinks(ws.id, page.id)
+        .then((b) => !stale && setBacklinks(b))
+        .catch(() => {})
+    load()
+    const timer = setInterval(load, 20_000)
+    return () => {
+      stale = true
+      clearInterval(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws?.id, page?.id])
 
   const focusEditor = () => {
     const pm = document.querySelector<HTMLElement>('.kw-editor .ProseMirror')
@@ -253,6 +276,7 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
               disabled: readonly || !wsHandle,
               onSelect: () => wsHandle && page && openPage(createPage(wsHandle.doc, { parent: page.id })),
             },
+            { label: 'Page history…', icon: <History size={14} />, onSelect: () => setHistoryOpen(true) },
             { label: 'Copy as markdown', icon: <ClipboardCopy size={14} />, onSelect: copyMd },
             { label: 'Export markdown…', icon: <Download size={14} />, onSelect: exportMd },
             { label: 'Export PDF…', icon: <FileDown size={14} />, onSelect: () => exportPdf(false) },
@@ -357,7 +381,9 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
                   handle={handle}
                   workspaceId={ws?.id ?? ''}
                   readonly={readonly}
+                  pages={view.live}
                   onOpenCanvas={setCanvasId}
+                  onOpenPage={(id) => openPage(id)}
                 />
               ) : (
                 <div className="h-40" />
@@ -374,7 +400,7 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
                       key={c.id}
                       type="button"
                       onClick={() => openPage(c.id)}
-                      className="press -mx-2 flex h-8 items-center gap-2 rounded-md px-2 text-left font-serif text-[15px] text-ink hover:bg-hover"
+                      className="press -mx-2 flex h-8 items-center gap-2 rounded-md px-2 text-left [font-family:var(--doc-font)] text-[15px] text-ink hover:bg-hover"
                     >
                       <span className="flex w-5 justify-center text-[14px]">
                         {c.icon || <FileText size={14} className="text-ink-3" />}
@@ -385,9 +411,44 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
                 </div>
               </section>
             )}
+            {backlinks.length > 0 && (
+              <section className="mt-6 border-t border-line pt-4" aria-label="Linked from">
+                <h3 className="mb-2 text-[11px] font-semibold tracking-[0.04em] text-ink-3 uppercase">
+                  Linked from
+                </h3>
+                <div className="flex flex-col">
+                  {backlinks.map((b) => {
+                    const linked = view.live.find((p) => p.id === b.id)
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => openPage(b.id)}
+                        className="press -mx-2 flex h-8 items-center gap-2 rounded-md px-2 text-left [font-family:var(--doc-font)] text-[15px] text-ink hover:bg-hover"
+                      >
+                        <span className="flex w-5 justify-center text-[14px]">
+                          {linked?.icon || <FileText size={14} className="text-ink-3" />}
+                        </span>
+                        <span className={b.title ? '' : 'text-ink-3'}>{b.title || 'Untitled'}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
           </article>
         )}
       </div>
+
+      {ws && page && (
+        <HistoryDialog
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+          workspaceId={ws.id}
+          pageId={page.id}
+          readonly={readonly}
+        />
+      )}
 
       {canvasId && handle && (
         <Suspense fallback={<div className="fixed inset-0 z-40 bg-paper" />}>

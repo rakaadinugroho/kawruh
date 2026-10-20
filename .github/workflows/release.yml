@@ -100,11 +100,16 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           # Prefills the server field on the sign-in screen (repo variable, optional).
           VITE_DEFAULT_SERVER: ${{ vars.KAWRUH_DEFAULT_SERVER }}
+          # Signs the update bundles (.sig) that installed apps verify before updating.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           tauriScript: pnpm tauri
           releaseId: ${{ needs.prepare.outputs.release_id }}
           args: ${{ matrix.args }}
+          # The publish job writes latest.json once both platforms are up.
+          uploadUpdaterJson: false
 
   server:
     name: Server (${{ matrix.target }})
@@ -148,8 +153,34 @@ jobs:
         run: |
           mkdir assets && cd assets
           gh release download "$GITHUB_REF_NAME"
-          rm -f SHA256SUMS.txt
+          rm -f SHA256SUMS.txt latest.json
+          # Update manifest for installed apps (the updater reads
+          # releases/latest/download/latest.json).
+          python3 - <<'PY'
+          import glob, json, os, sys
+          from datetime import datetime, timezone
+          tag = os.environ["GITHUB_REF_NAME"]
+          base = f"https://github.com/{os.environ['GH_REPO']}/releases/download/{tag}"
+          def entry(pattern):
+              files = [f for f in glob.glob(pattern) if os.path.exists(f + ".sig")]
+              if len(files) != 1:
+                  sys.exit(f"expected one signed {pattern}, found {files}")
+              return {"signature": open(files[0] + ".sig").read().strip(), "url": f"{base}/{files[0]}"}
+          mac = entry("*.app.tar.gz")
+          manifest = {
+              "version": tag.removeprefix("v"),
+              "notes": f"https://github.com/{os.environ['GH_REPO']}/releases/tag/{tag}",
+              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": {
+                  "darwin-aarch64": mac,
+                  "darwin-x86_64": mac,
+                  "windows-x86_64": entry("*-setup.exe"),
+              },
+          }
+          json.dump(manifest, open("latest.json", "w"), indent=2)
+          PY
+          cat latest.json
           sha256sum -- * > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          gh release upload "$GITHUB_REF_NAME" SHA256SUMS.txt --clobber
+          gh release upload "$GITHUB_REF_NAME" latest.json SHA256SUMS.txt --clobber
           gh release edit "$GITHUB_REF_NAME" --draft=false
