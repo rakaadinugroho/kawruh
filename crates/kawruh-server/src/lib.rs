@@ -11,9 +11,12 @@ pub mod disk;
 pub mod docs;
 pub mod error;
 pub mod mcp;
+pub mod ratelimit;
 pub mod share;
 pub mod state;
 pub mod ws;
+
+use std::net::SocketAddr;
 
 use axum::Router;
 use axum::routing::{delete, get, post};
@@ -37,6 +40,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/me", get(api::me))
         .route("/api/tokens", get(api::list_tokens).post(api::create_token))
         .route("/api/tokens/{id}", delete(api::delete_token))
+        .route(
+            "/api/invites",
+            get(api::list_invites).post(api::create_invite),
+        )
+        .route("/api/invites/{code}", delete(api::delete_invite))
         .route(
             "/api/workspaces",
             get(api::list_workspaces).post(api::create_workspace),
@@ -67,9 +75,14 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Serves on an already-bound listener until the process ends.
+/// Serves on an already-bound listener until the process ends. Handlers see
+/// the peer address (`ConnectInfo`), used for login rate limiting.
 pub async fn serve(listener: tokio::net::TcpListener, cfg: Config) -> anyhow::Result<()> {
     let state = AppState::new(cfg)?;
-    axum::serve(listener, router(state)).await?;
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }

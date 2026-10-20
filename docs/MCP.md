@@ -161,6 +161,9 @@ Pages an agent deletes go to the Trash, and you can restore them in the app.
 | `rename_page` | `page_id`, `title` | Change a page title |
 | `move_page` | `page_id`, `parent_id?`, `index?` | Re-parent (null = top level) and/or reorder |
 | `delete_page` | `page_id` | Move to Trash (restorable in the app) |
+| `upload_image` | `workspace_id`, `data_base64`, `mime` (png \| jpeg \| gif \| webp \| avif), `alt?`, `page_id?` | Store an image; returns its markdown `![alt](kawruh-asset://…)`, and appends it to `page_id` if given |
+| `list_backlinks` | `page_id` | Pages in the same workspace that link to this page, as `- Title (page_id)` |
+| `share_page` | `page_id` | Create (or return) the page's public read-only link; returns the URL |
 
 Write tools need the **editor** or **owner** role; viewers get a read-only error.
 
@@ -176,10 +179,13 @@ Page bodies are GitHub-flavoured markdown. Titles are not part of the body; use
 - **Link cards:** a paragraph that is only `[Title](https://… "kawruh:card")`
   shows as a bookmark card (`"kawruh:preview"` for a large preview). Elsewhere it
   reads as a normal link, so it's safe to write.
+- **Page links:** link to another page with `[Title](kawruh://page/<page_id>)`.
+  Use `list_pages` or `search_pages` to find the id. On a share page, links to
+  pages inside the shared subtree keep working; other page links show as plain text.
 - **Images:** images pasted in the app appear as
   `![](kawruh-asset://<workspace>/<sha256>.png)`. Keep those refs when rewriting
-  a page. Agents can't upload new images yet, but ordinary `https://` image URLs
-  work.
+  a page. Agents add new images with `upload_image`, which returns that markdown;
+  ordinary `https://` image URLs work too.
 - **Search** reads an index refreshed about two seconds after each edit.
 
 ## Example prompts

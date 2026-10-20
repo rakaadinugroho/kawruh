@@ -1,6 +1,7 @@
 //! Content-addressed image assets (`/api/workspaces/:id/assets/:name`),
 //! stored at `<data>/assets/<workspace>/<sha256>.<ext>`. Page markdown refers
-//! to them as `kawruh-asset://<workspace>/<name>`.
+//! to them as `kawruh-asset://<workspace>/<name>`. With `KAWRUH_QUOTA_MB` set,
+//! the assets of all workspaces a user owns share that quota.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +17,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::api::{require_role, valid_id};
 use crate::auth::AuthUser;
-use crate::db::Role;
+use crate::db::{self, Role};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 
@@ -47,8 +48,40 @@ pub fn parse_name(name: &str) -> Option<(&str, &'static str)> {
         .map(|(_, content_type)| (hash, *content_type))
 }
 
+/// Extension for an image type given as `image/png` or just `png`
+/// (`jpeg` → `jpg`).
+pub fn ext_for_mime(mime: &str) -> Option<&'static str> {
+    let mime = mime.trim().to_ascii_lowercase();
+    let short = mime.strip_prefix("image/").unwrap_or(&mime);
+    let short = if short == "jpeg" { "jpg" } else { short };
+    TYPES.iter().find(|(e, _)| *e == short).map(|(e, _)| *e)
+}
+
 pub fn workspace_dir(data_dir: &Path, workspace_id: &str) -> PathBuf {
     data_dir.join("assets").join(workspace_id)
+}
+
+/// Bytes of the assets stored in these workspaces (temp files not counted).
+pub fn bytes_used(data_dir: &Path, workspace_ids: &[String]) -> u64 {
+    workspace_ids
+        .iter()
+        .filter(|id| valid_id(id))
+        .filter_map(|id| std::fs::read_dir(workspace_dir(data_dir, id)).ok())
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|e| parse_name(&e.file_name().to_string_lossy()).is_some())
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum()
+}
+
+/// Asset bytes stored in all workspaces `owner_id` owns.
+pub fn owner_usage(state: &AppState, owner_id: &str) -> ApiResult<u64> {
+    let owned = {
+        let conn = state.db.lock();
+        db::workspaces_owned_by(&conn, owner_id)?
+    };
+    Ok(bytes_used(&state.cfg.data_dir, &owned))
 }
 
 /// Removes all assets of a workspace (nothing to do when it has none).
@@ -102,6 +135,118 @@ fn too_large(max: u64) -> ApiError {
     )
 }
 
+fn disk_full() -> ApiError {
+    ApiError::new(
+        StatusCode::INSUFFICIENT_STORAGE,
+        "disk_full",
+        "server is low on disk space; asset not saved",
+    )
+}
+
+/// Refuses a new asset of `size` bytes that would take the workspace's owner
+/// past `KAWRUH_QUOTA_MB`.
+fn check_quota(state: &AppState, workspace_id: &str, size: u64) -> ApiResult<()> {
+    let quota = state.cfg.quota_bytes();
+    if quota == 0 {
+        return Ok(());
+    }
+    let owner = {
+        let conn = state.db.lock();
+        db::workspace_owner(&conn, workspace_id)?
+    }
+    .ok_or_else(|| ApiError::not_found("workspace_not_found", "workspace not found"))?;
+    let used = owner_usage(state, &owner)?;
+    if used.saturating_add(size) > quota {
+        return Err(ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "quota_exceeded",
+            format!(
+                "storage quota exceeded: the workspace owner's images use {used} of {quota} bytes \
+                 ({} MB) and this one needs {size} more",
+                state.cfg.quota_mb
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn temp_path(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!(".{name}.{:016x}.tmp", rand::random::<u64>()))
+}
+
+/// Moves a received temp file into place as `name`. An asset that is already
+/// stored is never refused; a new one must fit the owner's quota. Returns
+/// whether the asset is new; the temp file is gone either way.
+async fn commit(
+    state: &AppState,
+    workspace_id: &str,
+    name: &str,
+    tmp: &Path,
+    size: u64,
+) -> ApiResult<bool> {
+    let dest = workspace_dir(&state.cfg.data_dir, workspace_id).join(name);
+    let result = async {
+        if tokio::fs::try_exists(&dest).await.unwrap_or(false) {
+            return Ok(false);
+        }
+        check_quota(state, workspace_id, size)?;
+        tokio::fs::rename(tmp, &dest)
+            .await
+            .map_err(ApiError::internal)?;
+        Ok(true)
+    }
+    .await;
+    if !matches!(result, Ok(true)) {
+        let _ = tokio::fs::remove_file(tmp).await;
+    }
+    result
+}
+
+/// Stores image bytes that arrived in one piece (MCP `upload_image`), with the
+/// size, low-disk and quota checks of `PUT`. The caller checks the role.
+/// Returns the asset name and whether it is new.
+pub async fn store(
+    state: &AppState,
+    workspace_id: &str,
+    ext: &str,
+    bytes: &[u8],
+) -> ApiResult<(String, bool)> {
+    let max = state.cfg.max_asset_bytes();
+    if bytes.len() as u64 > max {
+        return Err(too_large(max));
+    }
+    if !state.docs.writes_allowed() {
+        return Err(disk_full());
+    }
+    let name = format!("{}.{ext}", hex::encode(Sha256::digest(bytes)));
+    if !valid_id(workspace_id) || parse_name(&name).is_none() {
+        return Err(bad_name());
+    }
+    let dir = workspace_dir(&state.cfg.data_dir, workspace_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(ApiError::internal)?;
+    if tokio::fs::try_exists(dir.join(&name))
+        .await
+        .unwrap_or(false)
+    {
+        return Ok((name, false));
+    }
+    let tmp = temp_path(&dir, &name);
+    let written = async {
+        let mut file = tokio::fs::File::create(&tmp).await?;
+        file.write_all(bytes).await?;
+        file.sync_all().await
+    }
+    .await;
+    if let Err(e) = written {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(ApiError::internal(e));
+    }
+    let created = commit(state, workspace_id, &name, &tmp, bytes.len() as u64).await?;
+    Ok((name, created))
+}
+
 /// Streams `body` into `tmp`, enforcing `max`; returns (size, sha256 hex).
 async fn receive(body: Body, tmp: &Path, max: u64) -> ApiResult<(u64, String)> {
     let mut file = tokio::fs::File::create(tmp)
@@ -147,11 +292,7 @@ fn admit(
     require_role(state, workspace_id, &me.user, Role::Editor)?;
     parse_name(name).ok_or_else(bad_name)?;
     if !state.docs.writes_allowed() {
-        return Err(ApiError::new(
-            StatusCode::INSUFFICIENT_STORAGE,
-            "disk_full",
-            "server is low on disk space; asset not saved",
-        ));
+        return Err(disk_full());
     }
     Ok(())
 }
@@ -159,7 +300,8 @@ fn admit(
 /// `PUT /api/workspaces/:id/assets/:name` — raw bytes; idempotent.
 ///
 /// The body is read through the unlimited `Body` extractor (axum's default
-/// 2 MB limit does not apply) and capped at `KAWRUH_MAX_ASSET_MB` here.
+/// 2 MB limit does not apply) and capped at `KAWRUH_MAX_ASSET_MB` here. New
+/// assets must also fit the owner's `KAWRUH_QUOTA_MB`.
 pub async fn upload(
     State(state): State<AppState>,
     me: Result<AuthUser, ApiError>,
@@ -188,7 +330,7 @@ pub async fn upload(
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(ApiError::internal)?;
-    let tmp = dir.join(format!(".{name}.{:016x}.tmp", rand::random::<u64>()));
+    let tmp = temp_path(&dir, &name);
     let received = receive(body, &tmp, max).await;
     let size = match received {
         Ok((size, actual)) if actual == hash => size,
@@ -204,18 +346,10 @@ pub async fn upload(
             return Err(e);
         }
     };
-    let dest = dir.join(&name);
-    let existed = tokio::fs::try_exists(&dest).await.unwrap_or(false);
-    if existed {
-        let _ = tokio::fs::remove_file(&tmp).await;
-    } else if let Err(e) = tokio::fs::rename(&tmp, &dest).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(ApiError::internal(e));
-    }
-    let status = if existed {
-        StatusCode::OK
-    } else {
+    let status = if commit(&state, &id, &name, &tmp, size).await? {
         StatusCode::CREATED
+    } else {
+        StatusCode::OK
     };
     Ok((status, Json(json!({ "name": name, "size": size }))).into_response())
 }
@@ -284,6 +418,36 @@ mod tests {
             (err.status, err.code),
             (StatusCode::PAYLOAD_TOO_LARGE, "too_large")
         );
+    }
+
+    #[test]
+    fn mime_types_map_to_extensions() {
+        assert_eq!(ext_for_mime("image/png"), Some("png"));
+        assert_eq!(ext_for_mime("JPEG"), Some("jpg"));
+        assert_eq!(ext_for_mime("image/jpeg"), Some("jpg"));
+        assert_eq!(ext_for_mime(" webp "), Some("webp"));
+        assert_eq!(ext_for_mime("avif"), Some("avif"));
+        assert_eq!(ext_for_mime("image/gif"), Some("gif"));
+        assert_eq!(ext_for_mime("image/svg+xml"), None);
+        assert_eq!(ext_for_mime("text/png"), None);
+    }
+
+    #[test]
+    fn usage_counts_stored_assets_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = workspace_dir(dir.path(), "w1");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(ws.join(format!("{HASH}.png")), [0u8; 10]).unwrap();
+        std::fs::write(ws.join(format!(".{HASH}.png.1.tmp")), [0u8; 99]).unwrap();
+        let w2 = workspace_dir(dir.path(), "w2");
+        std::fs::create_dir_all(&w2).unwrap();
+        std::fs::write(w2.join(format!("{HASH}.gif")), [0u8; 5]).unwrap();
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            bytes_used(dir.path(), &ids(&["w1", "w2", "none", ".."])),
+            15
+        );
+        assert_eq!(bytes_used(dir.path(), &ids(&["w2"])), 5);
     }
 
     #[test]

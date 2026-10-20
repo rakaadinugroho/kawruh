@@ -5,6 +5,7 @@
 use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use base64::Engine;
 use rmcp::handler::server::common::Extension;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -21,7 +22,9 @@ use crate::auth::{self, AuthUser};
 use crate::db::{self, Role};
 use crate::docs::{LiveDoc, ORIGIN_MCP};
 use crate::error::ApiError;
+use crate::share::PAGE_LINK;
 use crate::state::AppState;
+use crate::{api, assets};
 
 type Parts = http::request::Parts;
 type ToolResult = Result<String, String>;
@@ -44,7 +47,15 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
 pub fn service(state: AppState) -> StreamableHttpService<KawruhMcp, LocalSessionManager> {
     // Bearer auth is enforced in front of the service, so the Host allow-list
     // (DNS-rebinding protection for unauthenticated local servers) is not needed.
-    let config = StreamableHttpServerConfig::default().disable_allowed_hosts();
+    // Requests must fit a base64 image of KAWRUH_MAX_ASSET_MB (upload_image).
+    let max_asset = usize::try_from(state.cfg.max_asset_bytes()).unwrap_or(usize::MAX);
+    let body_limit = (max_asset / 3)
+        .saturating_mul(4)
+        .saturating_add(1024 * 1024)
+        .max(4 * 1024 * 1024);
+    let config = StreamableHttpServerConfig::default()
+        .disable_allowed_hosts()
+        .with_max_request_body_bytes(body_limit);
     StreamableHttpService::new(
         move || Ok(KawruhMcp::new(state.clone())),
         Default::default(),
@@ -82,7 +93,8 @@ pub struct SearchArgs {
 pub struct CreateArgs {
     workspace_id: String,
     title: String,
-    /// Initial page body as markdown (GFM). Mermaid diagrams go in ```mermaid fences.
+    /// Initial page body as markdown (GFM). Mermaid diagrams go in ```mermaid fences;
+    /// link to another page with [Title](kawruh://page/<page_id>).
     markdown: Option<String>,
     /// Parent page id; omit to create a top-level page.
     parent_id: Option<String>,
@@ -100,6 +112,7 @@ pub enum UpdateMode {
 pub struct UpdateArgs {
     page_id: String,
     /// New page body as markdown (without the title; use rename_page for that).
+    /// Link to another page with [Title](kawruh://page/<page_id>).
     markdown: String,
     /// "replace" (default) overwrites the body, "append" adds to the end.
     mode: Option<UpdateMode>,
@@ -120,6 +133,19 @@ pub struct MoveArgs {
     index: Option<u32>,
 }
 
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct UploadImageArgs {
+    workspace_id: String,
+    /// The image file, base64-encoded (a `data:image/...;base64,` prefix is fine).
+    data_base64: String,
+    /// Image type: png, jpeg, gif, webp or avif (`image/png` works too).
+    mime: String,
+    /// Alt text: a short description of the image.
+    alt: Option<String>,
+    /// Also append the image to the end of this page (in the same workspace).
+    page_id: Option<String>,
+}
+
 fn caller(parts: &Parts) -> Result<AuthUser, String> {
     parts
         .extensions
@@ -130,6 +156,40 @@ fn caller(parts: &Parts) -> Result<AuthUser, String> {
 
 fn title_or_untitled(t: &str) -> &str {
     if t.trim().is_empty() { "Untitled" } else { t }
+}
+
+fn decode_image(data: &str) -> Result<Vec<u8>, String> {
+    let data = data.split_once("base64,").map_or(data, |(_, d)| d);
+    let clean: String = data.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(clean)
+        .map_err(|e| format!("data_base64 is not valid base64: {e}"))?;
+    if bytes.is_empty() {
+        return Err("the image is empty".into());
+    }
+    Ok(bytes)
+}
+
+/// Alt text that is safe inside `![...]`: one line, brackets escaped.
+fn alt_text(alt: &str) -> String {
+    alt.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+/// Whether `markdown` links to `page_id` (`kawruh://page/<page_id>`, not a
+/// longer id that merely starts with it).
+fn links_to(markdown: &str, page_id: &str) -> bool {
+    let needle = format!("{PAGE_LINK}{page_id}");
+    markdown.match_indices(&needle).any(|(i, _)| {
+        !markdown[i + needle.len()..]
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    })
 }
 
 impl KawruhMcp {
@@ -251,7 +311,7 @@ impl KawruhMcp {
     }
 
     #[tool(
-        description = "Read a page: title, path and its body as markdown (GFM; ```mermaid fences are diagrams, ```kawruh-canvas fences are drawings)."
+        description = "Read a page: title, path and its body as markdown (GFM; ```mermaid fences are diagrams, ```kawruh-canvas fences are drawings, [Title](kawruh://page/<page_id>) links to another page)."
     )]
     async fn read_page(
         &self,
@@ -329,7 +389,7 @@ impl KawruhMcp {
     }
 
     #[tool(
-        description = "Create a page (optionally under a parent page) with an optional markdown body. Returns the new page id."
+        description = "Create a page (optionally under a parent page) with an optional markdown body. Link to other pages with [Title](kawruh://page/<page_id>). Returns the new page id."
     )]
     async fn create_page(
         &self,
@@ -370,7 +430,7 @@ impl KawruhMcp {
     }
 
     #[tool(
-        description = "Replace (default) or append to a page's markdown body. Edits appear live in open editors."
+        description = "Replace (default) or append to a page's markdown body. Link to other pages with [Title](kawruh://page/<page_id>). Edits appear live in open editors."
     )]
     async fn update_page(
         &self,
@@ -468,6 +528,105 @@ impl KawruhMcp {
         workspace::delete_page(&doc.doc, &args.page_id, ORIGIN_MCP).map_err(|e| e.to_string())?;
         Ok(format!("Moved page {} to the trash.", args.page_id))
     }
+
+    #[tool(
+        description = "Upload an image (base64) to a workspace. Returns the markdown that shows it, ![alt](kawruh-asset://<workspace_id>/<name>), to put in a page body; with page_id the image is also appended to that page."
+    )]
+    async fn upload_image(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<UploadImageArgs>,
+    ) -> ToolResult {
+        let user = caller(&parts)?;
+        self.require_editor(&args.workspace_id, &user)?;
+        if let Some(page_id) = &args.page_id {
+            let (ws, _) = self.locate(page_id, &user)?;
+            if ws != args.workspace_id {
+                return Err(format!(
+                    "page {page_id} is not in workspace {}",
+                    args.workspace_id
+                ));
+            }
+            self.page_meta(&ws, page_id)?;
+        }
+        let ext = assets::ext_for_mime(&args.mime).ok_or_else(|| {
+            format!(
+                "unsupported image type \"{}\"; use png, jpeg, gif, webp or avif",
+                args.mime
+            )
+        })?;
+        let bytes = decode_image(&args.data_base64)?;
+        let (name, _) = assets::store(&self.state, &args.workspace_id, ext, &bytes)
+            .await
+            .map_err(|e| e.message)?;
+        let md = format!(
+            "![{}]({}{}/{name})",
+            alt_text(args.alt.as_deref().unwrap_or("")),
+            assets::SCHEME,
+            args.workspace_id
+        );
+        let Some(page_id) = &args.page_id else {
+            return Ok(md);
+        };
+        let live = self
+            .state
+            .docs
+            .get_or_load(page_id, &args.workspace_id, true)
+            .map_err(|e| e.to_string())?;
+        markdown::append_markdown(&live.doc, &md, ORIGIN_MCP);
+        Ok(format!("{md}\n\nAppended to page {page_id}."))
+    }
+
+    #[tool(
+        description = "List the pages that link to a page (with [Title](kawruh://page/<page_id>) in their body) as an outline: `- Title (page_id)`. Recent edits are indexed within a few seconds."
+    )]
+    async fn list_backlinks(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<PageArgs>,
+    ) -> ToolResult {
+        let user = caller(&parts)?;
+        let (ws, _) = self.locate(&args.page_id, &user)?;
+        let (meta, all) = self.page_meta(&ws, &args.page_id)?;
+        let candidates = {
+            let conn = self.state.db.lock();
+            db::pages_containing(&conn, &ws, &format!("{PAGE_LINK}{}", args.page_id))
+                .map_err(|e| e.to_string())?
+        };
+        let outline: String = workspace::live(all)
+            .iter()
+            .filter(|p| p.id != args.page_id)
+            .filter(|p| {
+                candidates
+                    .iter()
+                    .any(|(id, md)| *id == p.id && links_to(md, &args.page_id))
+            })
+            .map(|p| format!("- {} ({})\n", title_or_untitled(&p.title), p.id))
+            .collect();
+        let target = format!("{} ({})", title_or_untitled(&meta.title), meta.id);
+        if outline.is_empty() {
+            return Ok(format!("No pages link to {target}."));
+        }
+        Ok(format!("Pages linking to {target}:\n\n{outline}"))
+    }
+
+    #[tool(
+        description = "Create (or return the existing) public read-only link to a page and its sub-pages; anyone with the link can read them. Returns the URL."
+    )]
+    async fn share_page(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<PageArgs>,
+    ) -> ToolResult {
+        let user = caller(&parts)?;
+        let (ws, role) = self.locate(&args.page_id, &user)?;
+        if !role.can_edit() {
+            return Err("you have read-only access to this workspace".into());
+        }
+        let share = api::ensure_share(&self.state, &ws, &args.page_id, &user.user)
+            .map_err(|e| e.message)?;
+        Ok(self.state.share_url(&share.token))
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -478,8 +637,8 @@ impl ServerHandler for KawruhMcp {
             .with_instructions(
                 "Kawruh is a markdown notebook organised as workspaces containing a tree of pages. \
                  Use list_workspaces, then list_pages or search_pages to find page ids. Page bodies \
-                 are GitHub-flavoured markdown; titles are separate (rename_page). Edits are live for \
-                 everyone viewing the page.",
+                 are GitHub-flavoured markdown; titles are separate (rename_page). Pages link to each \
+                 other with [Title](kawruh://page/<page_id>). Edits are live for everyone viewing the page.",
             )
     }
 }

@@ -1,6 +1,7 @@
 //! Operator commands run against the database directly:
-//! `kawruh-server admin list-users` and `kawruh-server admin delete-user <name>`.
-//! Stop the service first so no live document is written back afterwards.
+//! `kawruh-server admin list-users`, `kawruh-server admin delete-user <name>`
+//! and `kawruh-server admin invite`. Stop the service before `delete-user` so
+//! no live document is written back afterwards; `invite` is safe while it runs.
 
 use std::path::Path;
 
@@ -14,6 +15,12 @@ pub fn list_users(conn: &Connection) -> rusqlite::Result<Vec<(String, String, i6
     )?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
     rows.collect()
+}
+
+/// A fresh system invite code (no owner), valid for 7 days.
+pub fn create_invite(conn: &Connection) -> rusqlite::Result<String> {
+    let invite = crate::db::create_invite(conn, None, kawruh_core::workspace::now_ms())?;
+    Ok(invite.code)
 }
 
 /// Deletes a user, the workspaces they own (documents and assets included)
@@ -64,7 +71,13 @@ pub fn run(args: &[String], conn: &mut Connection, data_dir: &Path) -> anyhow::R
             println!("deleted {name} and {n} owned workspace(s)");
             Ok(())
         }
-        _ => anyhow::bail!("usage: kawruh-server admin (list-users | delete-user <username>)"),
+        Some("invite") => {
+            println!("{}", create_invite(conn)?);
+            Ok(())
+        }
+        _ => anyhow::bail!(
+            "usage: kawruh-server admin (list-users | delete-user <username> | invite)"
+        ),
     }
 }
 

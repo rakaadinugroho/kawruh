@@ -1,12 +1,12 @@
-//! Passwords (argon2id), tokens (random, stored as SHA-256), and the
-//! `AuthUser` extractor for bearer-authenticated requests.
+//! Passwords (argon2id), tokens (random, stored as SHA-256), invite codes,
+//! and the `AuthUser` extractor for bearer-authenticated requests.
 
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use axum::extract::FromRequestParts;
 use http::request::Parts;
-use rand::RngCore;
+use rand::{Rng, RngCore};
 use sha2::{Digest, Sha256};
 
 use crate::db::{self, Db, User};
@@ -41,6 +41,26 @@ pub fn new_token(prefix: &str) -> String {
 
 pub fn hash_token(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+/// Characters of invite codes: no 0/O or 1/I/L to confuse.
+const INVITE_ALPHABET: &[u8] = b"23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+/// A fresh invite code, `KWR-XXXX-XXXX` (about 40 bits).
+pub fn new_invite_code() -> String {
+    let mut rng = rand::rng();
+    let mut group = || {
+        (0..4)
+            .map(|_| INVITE_ALPHABET[rng.random_range(0..INVITE_ALPHABET.len())] as char)
+            .collect::<String>()
+    };
+    let (a, b) = (group(), group());
+    format!("KWR-{a}-{b}")
+}
+
+/// An invite code as typed: surrounding whitespace and case do not matter.
+pub fn normalize_invite(code: &str) -> String {
+    code.trim().to_ascii_uppercase()
 }
 
 #[derive(Debug, Clone)]
@@ -110,5 +130,24 @@ mod tests {
         assert!(a.starts_with(PAT_PREFIX));
         assert_ne!(a, new_token(PAT_PREFIX));
         assert_eq!(hash_token(&a).len(), 64);
+    }
+
+    #[test]
+    fn invite_codes_are_readable() {
+        let code = new_invite_code();
+        assert_eq!(code.len(), 13, "{code}");
+        assert!(
+            code.starts_with("KWR-") && code.as_bytes()[8] == b'-',
+            "{code}"
+        );
+        assert!(
+            code[4..8]
+                .bytes()
+                .chain(code[9..].bytes())
+                .all(|b| INVITE_ALPHABET.contains(&b)),
+            "{code}"
+        );
+        assert_ne!(code, new_invite_code());
+        assert_eq!(normalize_invite(" kwr-ab2c-3def\n"), "KWR-AB2C-3DEF");
     }
 }

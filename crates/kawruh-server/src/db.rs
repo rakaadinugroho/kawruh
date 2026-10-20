@@ -1,5 +1,5 @@
-//! Server-side relational data: users, tokens, workspaces, members, shares,
-//! and the derived `page_text` search index. Documents themselves live in the
+//! Server-side relational data: users, tokens, invites, workspaces, members,
+//! shares, and the derived `page_text` search index. Documents themselves live in the
 //! `kawruh_core::store` tables of the same database.
 
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -69,7 +69,14 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             deleted INTEGER NOT NULL DEFAULT 0,
             updated_at INTEGER NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS page_text_workspace ON page_text(workspace_id);",
+        CREATE INDEX IF NOT EXISTS page_text_workspace ON page_text(workspace_id);
+        CREATE TABLE IF NOT EXISTS invites (
+            code_hash TEXT PRIMARY KEY,
+            code TEXT NOT NULL,
+            created_by TEXT REFERENCES users(id) ON DELETE CASCADE,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL
+        );",
     )
 }
 
@@ -161,6 +168,80 @@ pub fn insert_user(conn: &Connection, user: &User, password_hash: &str) -> rusql
     Ok(())
 }
 
+pub fn user_count(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+}
+
+/// How long an invite code stays valid.
+pub const INVITE_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Invite {
+    pub code: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+}
+
+/// Invite codes are looked up by their SHA-256, so checking one leaks nothing
+/// about stored codes through timing. The code is kept too, for listing.
+fn invite_hash(code: &str) -> String {
+    crate::auth::hash_token(&crate::auth::normalize_invite(code))
+}
+
+/// A fresh single-use invite code valid for `INVITE_TTL_MS` from `now`.
+/// `created_by` is `None` for a system invite (admin CLI). Prunes expired codes.
+pub fn create_invite(
+    conn: &Connection,
+    created_by: Option<&str>,
+    now: i64,
+) -> rusqlite::Result<Invite> {
+    conn.execute("DELETE FROM invites WHERE expires_at <= ?1", [now])?;
+    let invite = Invite {
+        code: crate::auth::new_invite_code(),
+        created_at: now,
+        expires_at: now + INVITE_TTL_MS,
+    };
+    conn.execute(
+        "INSERT INTO invites (code_hash, code, created_by, created_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![invite_hash(&invite.code), invite.code, created_by, invite.created_at, invite.expires_at],
+    )?;
+    Ok(invite)
+}
+
+/// A user's unused, unexpired invite codes.
+pub fn invites_of(conn: &Connection, user_id: &str, now: i64) -> rusqlite::Result<Vec<Invite>> {
+    let mut stmt = conn.prepare(
+        "SELECT code, created_at, expires_at FROM invites
+         WHERE created_by = ?1 AND expires_at > ?2 ORDER BY created_at",
+    )?;
+    let rows = stmt.query_map(params![user_id, now], |r| {
+        Ok(Invite {
+            code: r.get(0)?,
+            created_at: r.get(1)?,
+            expires_at: r.get(2)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// Revokes one of a user's invite codes; false when they have no such code.
+pub fn delete_invite(conn: &Connection, user_id: &str, code: &str) -> rusqlite::Result<bool> {
+    let n = conn.execute(
+        "DELETE FROM invites WHERE code_hash = ?1 AND created_by = ?2",
+        params![invite_hash(code), user_id],
+    )?;
+    Ok(n > 0)
+}
+
+/// Uses up an invite code; false when it is unknown, expired or already used.
+pub fn consume_invite(conn: &Connection, code: &str, now: i64) -> rusqlite::Result<bool> {
+    let n = conn.execute(
+        "DELETE FROM invites WHERE code_hash = ?1 AND expires_at > ?2",
+        params![invite_hash(code), now],
+    )?;
+    Ok(n > 0)
+}
+
 pub struct TokenRow {
     pub id: String,
     pub kind: String,
@@ -232,6 +313,12 @@ pub fn workspace_owner(conn: &Connection, workspace_id: &str) -> rusqlite::Resul
         |r| r.get(0),
     )
     .optional()
+}
+
+pub fn workspaces_owned_by(conn: &Connection, user_id: &str) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT id FROM workspaces WHERE owner_id = ?1")?;
+    let rows = stmt.query_map([user_id], |r| r.get(0))?;
+    rows.collect()
 }
 
 pub fn workspaces_of(conn: &Connection, user_id: &str) -> rusqlite::Result<Vec<WorkspaceRow>> {
@@ -341,6 +428,21 @@ pub fn page_workspace(conn: &Connection, page_id: &str) -> rusqlite::Result<Opti
     .optional()
 }
 
+/// `(page_id, markdown)` of indexed, not deleted pages of a workspace whose
+/// markdown contains `needle` (case-sensitive).
+pub fn pages_containing(
+    conn: &Connection,
+    workspace_id: &str,
+    needle: &str,
+) -> rusqlite::Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT page_id, markdown FROM page_text
+         WHERE workspace_id = ?1 AND deleted = 0 AND instr(markdown, ?2) > 0",
+    )?;
+    let rows = stmt.query_map([workspace_id, needle], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    rows.collect()
+}
+
 #[derive(Debug, Serialize)]
 pub struct SearchHit {
     pub page_id: String,
@@ -406,4 +508,55 @@ fn snippet(text: &str, query: &str) -> String {
         .take(160)
         .collect::<String>()
         .replace('\n', " ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> (tempfile::TempDir, Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("k.db")).unwrap();
+        db.lock()
+            .execute(
+                "INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES ('u1','alice','Alice','x',1)",
+                [],
+            )
+            .unwrap();
+        (dir, db)
+    }
+
+    #[test]
+    fn invites_are_single_use_and_expire() {
+        let (_dir, db) = db();
+        let conn = db.lock();
+        let t0 = 1_000;
+        let a = create_invite(&conn, Some("u1"), t0).unwrap();
+        let b = create_invite(&conn, Some("u1"), t0).unwrap();
+        assert_ne!(a.code, b.code);
+        assert_eq!(a.expires_at, t0 + INVITE_TTL_MS);
+        assert_eq!(invites_of(&conn, "u1", t0).unwrap().len(), 2);
+
+        // Codes are case- and whitespace-insensitive, and work once.
+        let typed = format!("  {}\n", a.code.to_lowercase());
+        assert!(consume_invite(&conn, &typed, t0 + 1).unwrap());
+        assert!(!consume_invite(&conn, &a.code, t0 + 1).unwrap());
+        assert_eq!(invites_of(&conn, "u1", t0).unwrap().len(), 1);
+
+        // Expired codes are neither listed nor accepted.
+        let late = t0 + INVITE_TTL_MS;
+        assert!(invites_of(&conn, "u1", late).unwrap().is_empty());
+        assert!(!consume_invite(&conn, &b.code, late).unwrap());
+        assert!(consume_invite(&conn, &b.code, late - 1).unwrap());
+        assert!(!consume_invite(&conn, "KWR-NOPE-NOPE", t0).unwrap());
+
+        // System invites have no owner; only the owner can revoke their codes.
+        let sys = create_invite(&conn, None, t0).unwrap();
+        assert!(!delete_invite(&conn, "u1", &sys.code).unwrap());
+        let c = create_invite(&conn, Some("u1"), t0).unwrap();
+        assert!(!delete_invite(&conn, "u2", &c.code).unwrap());
+        assert!(delete_invite(&conn, "u1", &c.code).unwrap());
+        assert!(!consume_invite(&conn, &c.code, t0).unwrap());
+        assert!(consume_invite(&conn, &sys.code, t0).unwrap());
+    }
 }

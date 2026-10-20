@@ -1,7 +1,7 @@
 //! Public read-only share pages (`/s/:token`, `/s/:token/:page_id`) and the
 //! images they embed (`/s/:token/assets/:name`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -17,6 +17,8 @@ use crate::db;
 use crate::state::AppState;
 
 pub const CANVAS_SVG: &str = "canvas_svg";
+/// Pages link to each other in markdown as `[Title](kawruh://page/<page_id>)`.
+pub const PAGE_LINK: &str = "kawruh://page/";
 /// Root map of a page doc: link href → JSON `{title, description, image, icon, site}`.
 pub const LINK_META: &str = "link_meta";
 const MERMAID_ESM: &str = "https://cdn.jsdelivr.net/npm/mermaid@12.2.0/dist/mermaid.esm.min.mjs";
@@ -123,6 +125,20 @@ pub async fn sub(
     render(state, token, Some(page_id)).await
 }
 
+/// Ids of `root` and all its descendants: the pages a share link reaches.
+fn subtree(pages: &[PageMeta], root: &str) -> HashSet<String> {
+    let mut out = HashSet::from([root.to_string()]);
+    let mut stack = vec![root.to_string()];
+    while let Some(id) = stack.pop() {
+        for p in pages.iter().filter(|p| p.parent == id) {
+            if out.insert(p.id.clone()) {
+                stack.push(p.id.clone());
+            }
+        }
+    }
+    out
+}
+
 /// Ancestors of `id` up to the root, nearest first.
 fn ancestors<'a>(pages: &'a [PageMeta], id: &str) -> Vec<&'a PageMeta> {
     let mut out = Vec::new();
@@ -149,10 +165,18 @@ async fn render(state: AppState, token: String, sub_page: Option<String>) -> Res
         return not_found();
     };
     // Only the shared page and its descendants are reachable.
-    let chain = ancestors(&pages, &page_id);
-    if page_id != share.page_id && !chain.iter().any(|p| p.id == share.page_id) {
+    let reachable = subtree(&pages, &share.page_id);
+    if !reachable.contains(&page_id) {
         return not_found();
     }
+    let chain = ancestors(&pages, &page_id);
+    let link = |id: &str| {
+        if id == share.page_id {
+            format!("/s/{token}")
+        } else {
+            format!("/s/{token}/{id}")
+        }
+    };
 
     let Ok(live) = state.docs.get_or_load(&page_id, &share.workspace_id, false) else {
         return not_found();
@@ -164,14 +188,7 @@ async fn render(state: AppState, token: String, sub_page: Option<String>) -> Res
     );
     let body_html = rewrite_assets(&body_html, &share.workspace_id, &token);
     let body_html = render_cards(&body_html, &string_map(&live.doc, LINK_META));
-
-    let link = |id: &str| {
-        if id == share.page_id {
-            format!("/s/{token}")
-        } else {
-            format!("/s/{token}/{id}")
-        }
-    };
+    let body_html = rewrite_page_links(&body_html, |id| reachable.contains(id).then(|| link(id)));
     let title_of = |p: &PageMeta| {
         if p.title.trim().is_empty() {
             "Untitled".to_string()
@@ -309,6 +326,58 @@ fn rewrite_assets(html: &str, workspace_id: &str, token: &str) -> String {
             _ => out.push_str(&rest[start..start + prefix.len() + end + 1]),
         }
         rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Points page links (`kawruh://page/<id>`) at the page within this share
+/// when `href_of` gives its URL; otherwise only the link text stays. No other
+/// `kawruh:` link survives either, so share HTML never holds such an href.
+fn rewrite_page_links(html: &str, href_of: impl Fn(&str) -> Option<String>) -> String {
+    const OPEN: &str = "<a href=\"";
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find(OPEN) {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + OPEN.len()..];
+        let Some(quote) = after.find('"') else {
+            rest = &rest[start..];
+            break;
+        };
+        let href = unesc(&after[..quote]);
+        if !href
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("kawruh:")
+        {
+            out.push_str(&rest[start..start + OPEN.len() + quote + 1]);
+            rest = &after[quote + 1..];
+            continue;
+        }
+        let target = href
+            .strip_prefix(PAGE_LINK)
+            .and_then(|r| r.split(['/', '?', '#']).next())
+            .filter(|id| crate::api::valid_id(id))
+            .and_then(&href_of);
+        match target {
+            Some(url) => {
+                out.push_str(&format!("{OPEN}{}\"", esc(&url)));
+                rest = &after[quote + 1..];
+            }
+            None => {
+                // Drop the opening tag and its `</a>` (links cannot nest).
+                let inner = &after[quote..];
+                let inner = inner.find('>').map_or("", |i| &inner[i + 1..]);
+                match inner.find("</a>") {
+                    Some(end) => {
+                        out.push_str(&inner[..end]);
+                        rest = &inner[end + "</a>".len()..];
+                    }
+                    None => rest = inner,
+                }
+            }
+        }
     }
     out.push_str(rest);
     out
@@ -766,6 +835,53 @@ mod tests {
         );
         assert!(out.contains(">Found</span>"), "{out}");
         assert!(out.contains("<span>例え.test</span>"), "{out}");
+    }
+
+    #[test]
+    fn page_links_point_into_the_share_or_lose_their_link() {
+        let md = "[In](kawruh://page/p1) [Titled](kawruh://page/p1 \"tip\") [Out](kawruh://page/p9) \
+                  [Bad](kawruh://page/../x) [Odd](KAWRUH://page/p1) [Other](kawruh://elsewhere) \
+                  [Web](https://example.com) [Rel](/s/x)[^n]\n\n[^n]: note\n";
+        let html = kawruh_core::markdown::markdown_to_html(md);
+        let out = rewrite_page_links(&html, |id| (id == "p1").then(|| "/s/t&k/p1".to_string()));
+        assert!(out.contains("<a href=\"/s/t&amp;k/p1\">In</a>"), "{out}");
+        assert!(
+            out.contains("<a href=\"/s/t&amp;k/p1\" title=\"tip\">Titled</a>"),
+            "{out}"
+        );
+        for text in [" Out ", " Bad ", " Odd ", " Other "] {
+            assert!(out.contains(text), "{text} in {out}");
+        }
+        assert!(out.contains("<a href=\"https://example.com\">Web</a>"));
+        assert!(out.contains("<a href=\"/s/x\">Rel</a>"));
+        assert!(out.contains("href=\"#fn-n\""), "{out}");
+        assert!(!out.to_lowercase().contains("kawruh:"), "{out}");
+        // Unterminated markup is passed through without panicking.
+        assert_eq!(
+            rewrite_page_links("<a href=\"kawruh", |_| None),
+            "<a href=\"kawruh"
+        );
+        assert_eq!(
+            rewrite_page_links("<a href=\"kawruh://page/p1\">x", |_| None),
+            "x"
+        );
+    }
+
+    #[test]
+    fn subtree_holds_the_root_and_its_descendants() {
+        let page = |id: &str, parent: &str| PageMeta {
+            id: id.into(),
+            title: String::new(),
+            parent: parent.into(),
+            order: 0.0,
+            icon: String::new(),
+            created: 0,
+            deleted: 0,
+        };
+        let pages = [page("a", ""), page("b", "a"), page("c", "b"), page("d", "")];
+        let mut ids: Vec<String> = subtree(&pages, "a").into_iter().collect();
+        ids.sort();
+        assert_eq!(ids, ["a", "b", "c"]);
     }
 
     #[test]

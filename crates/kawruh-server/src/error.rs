@@ -9,6 +9,8 @@ pub struct ApiError {
     pub status: StatusCode,
     pub code: &'static str,
     pub message: String,
+    /// Seconds for a `Retry-After` header.
+    pub retry_after: Option<u64>,
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;
@@ -19,6 +21,7 @@ impl ApiError {
             status,
             code,
             message: message.into(),
+            retry_after: None,
         }
     }
     pub fn bad_request(code: &'static str, message: impl Into<String>) -> ApiError {
@@ -39,6 +42,17 @@ impl ApiError {
     }
     pub fn conflict(code: &'static str, message: impl Into<String>) -> ApiError {
         ApiError::new(StatusCode::CONFLICT, code, message)
+    }
+    pub fn too_many_attempts(wait: std::time::Duration) -> ApiError {
+        let secs = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+        let secs = secs.max(1);
+        let mut e = ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_attempts",
+            format!("too many failed login attempts; try again in {secs} seconds"),
+        );
+        e.retry_after = Some(secs);
+        e
     }
     pub fn internal(e: impl std::fmt::Display) -> ApiError {
         tracing::error!("internal error: {e}");
@@ -69,6 +83,10 @@ impl IntoResponse for ApiError {
         if self.status == StatusCode::UNAUTHORIZED {
             res.headers_mut()
                 .insert("WWW-Authenticate", http::HeaderValue::from_static("Bearer"));
+        }
+        if let Some(secs) = self.retry_after {
+            res.headers_mut()
+                .insert(http::header::RETRY_AFTER, http::HeaderValue::from(secs));
         }
         res
     }

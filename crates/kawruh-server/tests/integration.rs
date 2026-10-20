@@ -40,6 +40,9 @@ async fn start_with(
         allow_signup: true,
         min_free_mb: 0,
         max_asset_mb: 10,
+        quota_mb: 0,
+        login_max_failures: 10,
+        login_window: Duration::from_secs(15 * 60),
     };
     configure(&mut cfg);
     let task = tokio::spawn(kawruh_server::serve(listener, cfg));
@@ -51,6 +54,9 @@ async fn start_with(
 }
 
 fn http() -> reqwest::Client {
+    // In a whole-workspace build reqwest is compiled with rustls but no crypto
+    // provider (the desktop app's updater asks for that); pick one here.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::new()
 }
 
@@ -198,6 +204,8 @@ async fn auth_register_login_me() {
     assert_eq!(status, 200);
     assert_eq!(me["id"], id.as_str());
     assert_eq!(me["username"], "alice");
+    assert_eq!(me["storage_used_bytes"], 0);
+    assert_eq!(me["storage_quota_bytes"], 0);
 
     let (status, body) = get(&s, None, "/api/me").await;
     assert_eq!(status, 401);
@@ -646,13 +654,16 @@ async fn mcp_tools_edit_live_documents() {
         [
             "create_page",
             "delete_page",
+            "list_backlinks",
             "list_pages",
             "list_workspaces",
             "move_page",
             "read_page",
             "rename_page",
             "search_pages",
-            "update_page"
+            "share_page",
+            "update_page",
+            "upload_image"
         ]
     );
 
@@ -1364,4 +1375,653 @@ async fn share_pages_serve_assets_and_link_cards() {
         .status()
         .as_u16();
     assert_eq!(status, 404);
+}
+
+// ---- sign-up policy & invites ---------------------------------------------------
+
+async fn register_with(s: &Server, username: &str, invite: Option<&str>) -> (u16, Value) {
+    let mut body = json!({ "username": username, "password": "password123" });
+    if let Some(code) = invite {
+        body["invite"] = json!(code);
+    }
+    post(s, "", "/api/auth/register", body).await
+}
+
+async fn del(s: &Server, token: &str, path: &str) -> (u16, Value) {
+    let res = http()
+        .delete(format!("{}{path}", s.base))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap();
+    let status = res.status().as_u16();
+    (status, res.json().await.unwrap_or(Value::Null))
+}
+
+async fn pat(s: &Server, token: &str) -> String {
+    let (status, body) = post(s, token, "/api/tokens", json!({"name": "agent"})).await;
+    assert_eq!(status, 200, "{body}");
+    body["token"].as_str().unwrap().to_string()
+}
+
+async fn invite_codes(s: &Server, token: &str) -> Vec<String> {
+    let (status, list) = get(s, Some(token), "/api/invites").await;
+    assert_eq!(status, 200, "{list}");
+    list.as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["code"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn closed_signup_needs_single_use_invites() {
+    let s = start_with(Arc::new(tempfile::tempdir().unwrap()), |c| {
+        c.allow_signup = false
+    })
+    .await;
+
+    // The very first account can always register (fresh server bootstrap).
+    let (status, first) = register_with(&s, "alice", None).await;
+    assert_eq!(status, 200, "{first}");
+    let alice = first["token"].as_str().unwrap().to_string();
+
+    let (status, body) = register_with(&s, "bob", None).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (403, Some("invite_required"))
+    );
+    let (status, body) = register_with(&s, "bob", Some("KWR-AAAA-BBBB")).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (403, Some("invite_invalid"))
+    );
+
+    // Any signed-in user can create codes, with a session or a PAT.
+    let (status, inv) = post(&s, &alice, "/api/invites", json!({})).await;
+    assert_eq!(status, 200, "{inv}");
+    let code = inv["code"].as_str().unwrap().to_string();
+    assert!(code.starts_with("KWR-") && code.len() == 13, "{code}");
+    let week = 7 * 24 * 3600 * 1000;
+    let now = kawruh_core::workspace::now_ms();
+    let expires = inv["expires_at"].as_i64().unwrap();
+    assert!(
+        (now + week - 60_000..=now + week).contains(&expires),
+        "{inv}"
+    );
+    let alice_pat = pat(&s, &alice).await;
+    let (status, inv2) = post(&s, &alice_pat, "/api/invites", json!({})).await;
+    assert_eq!(status, 200, "{inv2}");
+    let code2 = inv2["code"].as_str().unwrap().to_string();
+    assert_eq!(
+        invite_codes(&s, &alice).await,
+        [code.clone(), code2.clone()]
+    );
+    assert_eq!(get(&s, None, "/api/invites").await.0, 401);
+
+    // A failed registration does not use up the code.
+    let (status, body) = register_with(&s, "alice", Some(&code)).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (409, Some("username_taken"))
+    );
+    // Codes are case-insensitive and work once.
+    let (status, body) =
+        register_with(&s, "bob", Some(&format!(" {} ", code.to_lowercase()))).await;
+    assert_eq!(status, 200, "{body}");
+    let bob = body["token"].as_str().unwrap().to_string();
+    let (status, body) = register_with(&s, "carol", Some(&code)).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (403, Some("invite_invalid"))
+    );
+    assert_eq!(invite_codes(&s, &alice).await, std::slice::from_ref(&code2));
+
+    // Only the creator can revoke a code; a revoked code is invalid.
+    let path = format!("/api/invites/{code2}");
+    let (status, body) = del(&s, &bob, &path).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (404, Some("invite_not_found"))
+    );
+    assert_eq!(del(&s, &alice, &path).await.0, 204);
+    assert_eq!(del(&s, &alice, &path).await.0, 404);
+    let (status, body) = register_with(&s, "carol", Some(&code2)).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (403, Some("invite_invalid"))
+    );
+    assert!(invite_codes(&s, &alice).await.is_empty());
+
+    // Expired codes are neither listed nor accepted.
+    let (_, inv3) = post(&s, &bob, "/api/invites", json!({})).await;
+    let code3 = inv3["code"].as_str().unwrap().to_string();
+    let db = kawruh_server::db::Db::open(&s.dir.path().join("kawruh.db")).unwrap();
+    db.lock()
+        .execute(
+            "UPDATE invites SET expires_at = ?1 WHERE code = ?2",
+            rusqlite::params![kawruh_core::workspace::now_ms() - 1, code3],
+        )
+        .unwrap();
+    assert!(invite_codes(&s, &bob).await.is_empty());
+    let (status, body) = register_with(&s, "carol", Some(&code3)).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (403, Some("invite_invalid"))
+    );
+
+    // `kawruh-server admin invite` makes a system code that belongs to nobody.
+    let sys = kawruh_server::admin::create_invite(&db.lock()).unwrap();
+    assert!(sys.starts_with("KWR-"));
+    assert!(invite_codes(&s, &alice).await.is_empty());
+    let (status, body) = register_with(&s, "carol", Some(&sys)).await;
+    assert_eq!(status, 200, "{body}");
+
+    // With open sign-up the invite field is ignored.
+    let open = start().await;
+    register(&open, "first").await;
+    let (status, body) = register_with(&open, "dave", Some("not-a-code")).await;
+    assert_eq!(status, 200, "{body}");
+}
+
+// ---- storage quota ----------------------------------------------------------------
+
+#[tokio::test]
+async fn asset_quota_is_shared_by_an_owners_workspaces() {
+    let s = start_with(Arc::new(tempfile::tempdir().unwrap()), |c| c.quota_mb = 1).await;
+    let (alice, _) = register(&s, "alice").await;
+    let (bob, _) = register(&s, "bob").await;
+    let one = create_workspace(&s, &alice, "One").await;
+    let two = create_workspace(&s, &alice, "Two").await;
+    let bobs = create_workspace(&s, &bob, "Bob's").await;
+    add_member(&s, &alice, &one, "bob", "editor").await;
+
+    let usage = |token: String| {
+        let s = &s;
+        async move {
+            let (status, me) = get(s, Some(&token), "/api/me").await;
+            assert_eq!(status, 200, "{me}");
+            (
+                me["storage_used_bytes"].as_u64().unwrap(),
+                me["storage_quota_bytes"].as_u64().unwrap(),
+            )
+        }
+    };
+    assert_eq!(usage(alice.clone()).await, (0, 1024 * 1024));
+
+    let a = vec![1u8; 700 * 1024];
+    let b = vec![2u8; 300 * 1024];
+    let a_name = asset_name(&a, "gif");
+    assert_eq!(put_asset(&s, &alice, &one, &a_name, a.clone()).await.0, 201);
+    assert_eq!(
+        put_asset(&s, &alice, &two, &asset_name(&b, "gif"), b.clone())
+            .await
+            .0,
+        201
+    );
+    assert_eq!(usage(alice.clone()).await, (1000 * 1024, 1024 * 1024));
+
+    // A new asset past the owner's quota is refused in any workspace they
+    // own, whoever uploads it, and nothing is left on disk.
+    let c = vec![3u8; 30 * 1024];
+    let c_name = asset_name(&c, "gif");
+    let (status, body) = put_asset(&s, &alice, &two, &c_name, c.clone()).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (413, Some("quota_exceeded")),
+        "{body}"
+    );
+    assert!(body["error"].as_str().unwrap().contains("quota"), "{body}");
+    let (status, body) = put_asset(&s, &bob, &one, &c_name, c.clone()).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (413, Some("quota_exceeded"))
+    );
+    let files: Vec<String> = std::fs::read_dir(s.dir.path().join("assets").join(&one))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(files, std::slice::from_ref(&a_name));
+
+    // Re-uploading a stored asset is never refused.
+    assert_eq!(put_asset(&s, &alice, &one, &a_name, a.clone()).await.0, 200);
+    // Bob's own workspace counts against his own quota.
+    assert_eq!(put_asset(&s, &bob, &bobs, &c_name, c.clone()).await.0, 201);
+    assert_eq!(usage(bob.clone()).await, (30 * 1024, 1024 * 1024));
+    // Filling the quota exactly is fine; MCP uploads hit the same limit.
+    let d = vec![4u8; 24 * 1024];
+    assert_eq!(
+        put_asset(&s, &alice, &two, &asset_name(&d, "gif"), d)
+            .await
+            .0,
+        201
+    );
+    let mut mcp = Mcp::connect(&s, &pat(&s, &alice).await).await;
+    let (text, err) = mcp
+        .call(
+            "upload_image",
+            json!({"workspace_id": one, "data_base64": "R0lGODlh", "mime": "gif"}),
+        )
+        .await;
+    assert!(err && text.contains("quota"), "{text}");
+}
+
+// ---- login rate limiting ------------------------------------------------------------
+
+async fn login_from(
+    s: &Server,
+    username: &str,
+    password: &str,
+    headers: &[(&str, &str)],
+) -> reqwest::Response {
+    let mut req = http()
+        .post(format!("{}/api/auth/login", s.base))
+        .json(&json!({ "username": username, "password": password }));
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    req.send().await.unwrap()
+}
+
+async fn login_status(s: &Server, username: &str, password: &str, headers: &[(&str, &str)]) -> u16 {
+    login_from(s, username, password, headers)
+        .await
+        .status()
+        .as_u16()
+}
+
+#[tokio::test]
+async fn failed_logins_are_rate_limited() {
+    let s = start_with(Arc::new(tempfile::tempdir().unwrap()), |c| {
+        c.login_max_failures = 3;
+        c.login_window = Duration::from_secs(3600);
+    })
+    .await;
+    for name in ["alice", "bob", "carol"] {
+        register(&s, name).await;
+    }
+    let ok = "password123";
+    let cf = |i: u32| format!("198.51.100.{i}");
+
+    // Per username, whatever IP the attempts claim to come from.
+    for i in 0..3 {
+        let ip = cf(i);
+        assert_eq!(
+            login_status(&s, "alice", "wrong-pass", &[("CF-Connecting-IP", &ip)]).await,
+            401
+        );
+    }
+    let res = login_from(&s, "alice", ok, &[("CF-Connecting-IP", &cf(100))]).await;
+    assert_eq!(res.status().as_u16(), 429);
+    let retry: u64 = header(&res, "retry-after").parse().unwrap();
+    assert!((3590..=3600).contains(&retry), "{retry}");
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["code"], "too_many_attempts");
+    assert_eq!(
+        login_status(&s, "bob", ok, &[("CF-Connecting-IP", &cf(101))]).await,
+        200
+    );
+
+    // Per client IP (the first X-Forwarded-For entry), across usernames.
+    let xff = ("X-Forwarded-For", "203.0.113.7, 10.0.0.1");
+    for name in ["nobody1", "nobody2", "nobody3"] {
+        assert_eq!(login_status(&s, name, "x", &[xff]).await, 401);
+    }
+    assert_eq!(login_status(&s, "bob", ok, &[xff]).await, 429);
+    assert_eq!(
+        login_status(&s, "bob", ok, &[("X-Forwarded-For", "203.0.113.8")]).await,
+        200
+    );
+    // CF-Connecting-IP takes precedence over X-Forwarded-For.
+    assert_eq!(
+        login_status(&s, "bob", ok, &[("CF-Connecting-IP", &cf(102)), xff]).await,
+        200
+    );
+
+    // A successful login clears the username's failures.
+    for i in 10..12 {
+        assert_eq!(
+            login_status(&s, "carol", "wrong-pass", &[("CF-Connecting-IP", &cf(i))]).await,
+            401
+        );
+    }
+    assert_eq!(
+        login_status(&s, "carol", ok, &[("CF-Connecting-IP", &cf(12))]).await,
+        200
+    );
+    for i in 13..15 {
+        assert_eq!(
+            login_status(&s, "carol", "wrong-pass", &[("CF-Connecting-IP", &cf(i))]).await,
+            401
+        );
+    }
+    assert_eq!(
+        login_status(&s, "carol", ok, &[("CF-Connecting-IP", &cf(15))]).await,
+        200
+    );
+
+    // Without proxy headers the socket peer address counts.
+    for name in ["nobody4", "nobody5", "nobody6"] {
+        assert_eq!(login_status(&s, name, "x", &[]).await, 401);
+    }
+    assert_eq!(login_status(&s, "bob", ok, &[]).await, 429);
+
+    // The block lifts once the window has passed.
+    let quick = start_with(Arc::new(tempfile::tempdir().unwrap()), |c| {
+        c.login_max_failures = 1;
+        c.login_window = Duration::from_millis(800);
+    })
+    .await;
+    register(&quick, "alice").await;
+    assert_eq!(login_status(&quick, "alice", "wrong-pass", &[]).await, 401);
+    let res = login_from(&quick, "alice", ok, &[]).await;
+    assert_eq!(res.status().as_u16(), 429);
+    assert_eq!(header(&res, "retry-after"), "1");
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    assert_eq!(login_status(&quick, "alice", ok, &[]).await, 200);
+}
+
+// ---- page links on share pages --------------------------------------------------------
+
+#[tokio::test]
+async fn share_pages_link_only_pages_inside_the_share() {
+    let s = start().await;
+    let (alice, _) = register(&s, "alice").await;
+    let ws = create_workspace(&s, &alice, "Wiki").await;
+    let mut mcp = Mcp::connect(&s, &pat(&s, &alice).await).await;
+    let (text, _) = mcp
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Outside", "markdown": "secret"}),
+        )
+        .await;
+    let outside = extract_id(&text);
+    let (text, _) = mcp
+        .call("create_page", json!({"workspace_id": ws, "title": "Root"}))
+        .await;
+    let root = extract_id(&text);
+    let (text, err) = mcp
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Child", "parent_id": root,
+                   "markdown": format!("Back to [Root](kawruh://page/{root}) and [Outside](kawruh://page/{outside}).")}),
+        )
+        .await;
+    assert!(!err, "{text}");
+    let child = extract_id(&text);
+    let (text, err) = mcp
+        .call(
+            "update_page",
+            json!({"page_id": root, "markdown": format!(
+                "See [Child](kawruh://page/{child} \"tip\"), [Me](kawruh://page/{root}), [Outside](kawruh://page/{outside}) and [Gone](kawruh://page/deadbeef)."
+            )}),
+        )
+        .await;
+    assert!(!err, "{text}");
+
+    let (status, share) = post(
+        &s,
+        &alice,
+        &format!("/api/workspaces/{ws}/shares"),
+        json!({"page_id": root}),
+    )
+    .await;
+    assert_eq!(status, 200, "{share}");
+    let token = share["token"].as_str().unwrap();
+    let url = share["url"].as_str().unwrap();
+
+    let html = http().get(url).send().await.unwrap().text().await.unwrap();
+    assert!(
+        html.contains(&format!(
+            "<a href=\"/s/{token}/{child}\" title=\"tip\">Child</a>"
+        )),
+        "{html}"
+    );
+    assert!(
+        html.contains(&format!("<a href=\"/s/{token}\">Me</a>, Outside and Gone.")),
+        "{html}"
+    );
+    assert!(!html.contains(&outside), "{html}");
+    assert!(!html.to_lowercase().contains("kawruh://"), "{html}");
+
+    let html = http()
+        .get(format!("{url}/{child}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        html.contains(&format!(
+            "Back to <a href=\"/s/{token}\">Root</a> and Outside."
+        )),
+        "{html}"
+    );
+    assert!(!html.contains(&outside), "{html}");
+    assert!(!html.to_lowercase().contains("kawruh://"), "{html}");
+}
+
+// ---- MCP images, backlinks and share links ----------------------------------------------
+
+#[tokio::test]
+async fn mcp_uploads_images_lists_backlinks_and_shares_pages() {
+    use base64::Engine;
+    let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+
+    let s = start_with(Arc::new(tempfile::tempdir().unwrap()), |c| {
+        c.max_asset_mb = 1
+    })
+    .await;
+    let (alice, _) = register(&s, "alice").await;
+    let (bob, _) = register(&s, "bob").await;
+    let (carol, _) = register(&s, "carol").await;
+    let (dave, _) = register(&s, "dave").await;
+    let ws = create_workspace(&s, &alice, "Media").await;
+    let other = create_workspace(&s, &alice, "Other").await;
+    add_member(&s, &alice, &ws, "bob", "editor").await;
+    add_member(&s, &alice, &ws, "carol", "viewer").await;
+    let mut a = Mcp::connect(&s, &pat(&s, &alice).await).await;
+    let mut b = Mcp::connect(&s, &pat(&s, &bob).await).await;
+    let mut c = Mcp::connect(&s, &pat(&s, &carol).await).await;
+    let mut d = Mcp::connect(&s, &pat(&s, &dave).await).await;
+
+    // Without a page: stores the asset and returns its markdown.
+    let png = b"\x89PNG\r\n\x1a\n not really a png".to_vec();
+    let name = asset_name(&png, "png");
+    let args = json!({"workspace_id": ws, "data_base64": b64(&png), "mime": "image/png", "alt": "A [chart]\nof sales"});
+    let (text, err) = a.call("upload_image", args.clone()).await;
+    assert!(!err, "{text}");
+    assert_eq!(
+        text,
+        format!("![A \\[chart\\] of sales](kawruh-asset://{ws}/{name})")
+    );
+    let stored = s.dir.path().join("assets").join(&ws).join(&name);
+    assert_eq!(std::fs::read(&stored).unwrap(), png);
+    let res = http()
+        .get(format!("{}/api/workspaces/{ws}/assets/{name}", s.base))
+        .bearer_auth(&carol)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status().as_u16(), 200);
+    assert_eq!(res.bytes().await.unwrap().as_ref(), png.as_slice());
+    // The same image again is fine (content-addressed).
+    assert_eq!(a.call("upload_image", args).await, (text.clone(), false));
+
+    // With page_id (an editor, a data URL): also appended to the page.
+    let (text, _) = a
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Gallery", "markdown": "Intro."}),
+        )
+        .await;
+    let page = extract_id(&text);
+    let jpg = b"\xff\xd8\xff not really a jpeg".to_vec();
+    let jpg_ref = format!("![](kawruh-asset://{ws}/{})", asset_name(&jpg, "jpg"));
+    let (text, err) = b
+        .call(
+            "upload_image",
+            json!({"workspace_id": ws, "data_base64": format!("data:image/jpeg;base64,{}", b64(&jpg)), "mime": "jpeg", "page_id": page}),
+        )
+        .await;
+    assert!(!err, "{text}");
+    assert!(
+        text.starts_with(&jpg_ref) && text.contains("Appended to page"),
+        "{text}"
+    );
+    let (read, _) = a.call("read_page", json!({"page_id": page})).await;
+    assert!(read.contains("Intro.") && read.contains(&jpg_ref), "{read}");
+
+    // The page must be in that workspace; roles and input are checked.
+    let (text, _) = a
+        .call(
+            "create_page",
+            json!({"workspace_id": other, "title": "Elsewhere"}),
+        )
+        .await;
+    let elsewhere = extract_id(&text);
+    let small = b64(b"GIF89a");
+    for (who, args, expected) in [
+        (
+            'a',
+            json!({"workspace_id": ws, "data_base64": small, "mime": "gif", "page_id": elsewhere}),
+            "not in workspace",
+        ),
+        (
+            'c',
+            json!({"workspace_id": ws, "data_base64": small, "mime": "gif"}),
+            "read-only",
+        ),
+        (
+            'd',
+            json!({"workspace_id": ws, "data_base64": small, "mime": "gif"}),
+            "not accessible",
+        ),
+        (
+            'a',
+            json!({"workspace_id": ws, "data_base64": small, "mime": "image/svg+xml"}),
+            "unsupported",
+        ),
+        (
+            'a',
+            json!({"workspace_id": ws, "data_base64": "%%%", "mime": "png"}),
+            "base64",
+        ),
+        (
+            'a',
+            json!({"workspace_id": ws, "data_base64": b64(&vec![0u8; 1024 * 1024 + 1]), "mime": "png"}),
+            "limited to",
+        ),
+    ] {
+        let mcp = match who {
+            'a' => &mut a,
+            'c' => &mut c,
+            _ => &mut d,
+        };
+        let (text, err) = mcp.call("upload_image", args).await;
+        assert!(err && text.contains(expected), "{expected}: {text}");
+    }
+
+    // list_backlinks: pages of the same workspace whose body links here.
+    let (text, _) = a
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Target"}),
+        )
+        .await;
+    let target = extract_id(&text);
+    let link = |label: &str| format!("[{label}](kawruh://page/{target})");
+    let (text, _) = a
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Links here", "markdown": format!("See {}.", link("Target"))}),
+        )
+        .await;
+    let one = extract_id(&text);
+    let (text, _) = a
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Also", "parent_id": one, "markdown": format!("[t](kawruh://page/{target} \"x\") and more")}),
+        )
+        .await;
+    let two = extract_id(&text);
+    let (text, _) = a
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Unrelated", "markdown": format!("[x](kawruh://page/{target}0) is another page")}),
+        )
+        .await;
+    let unrelated = extract_id(&text);
+    a.call(
+        "create_page",
+        json!({"workspace_id": other, "title": "Far", "markdown": link("Target")}),
+    )
+    .await;
+    a.call(
+        "update_page",
+        json!({"page_id": target, "markdown": format!("Self: {}", link("me"))}),
+    )
+    .await;
+    let (text, err) = c.call("list_backlinks", json!({"page_id": target})).await;
+    assert!(!err, "{text}");
+    assert!(
+        text.starts_with(&format!("Pages linking to Target ({target}):")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("- Links here ({one})\n"))
+            && text.contains(&format!("- Also ({two})\n")),
+        "{text}"
+    );
+    assert!(
+        !text.contains(&unrelated) && !text.contains("- Target"),
+        "{text}"
+    );
+    assert_eq!(text.matches("\n- ").count(), 2, "{text}");
+    // A link added with update_page shows up once the index catches up.
+    a.call(
+        "update_page",
+        json!({"page_id": unrelated, "markdown": format!("Now {}", link("linked"))}),
+    )
+    .await;
+    let mut text = String::new();
+    for _ in 0..40 {
+        text = c.call("list_backlinks", json!({"page_id": target})).await.0;
+        if text.contains(&unrelated) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert!(
+        text.contains(&format!("- Unrelated ({unrelated})")),
+        "{text}"
+    );
+    let (text, err) = c.call("list_backlinks", json!({"page_id": two})).await;
+    assert!(!err && text.starts_with("No pages link to Also"), "{text}");
+    let (text, err) = d.call("list_backlinks", json!({"page_id": target})).await;
+    assert!(err && text.contains("not accessible"), "{text}");
+
+    // share_page: editors create (or get back) the page's public link.
+    let (url, err) = b.call("share_page", json!({"page_id": page})).await;
+    assert!(!err, "{url}");
+    assert!(url.starts_with(&format!("{}/s/", s.base)), "{url}");
+    assert_eq!(
+        a.call("share_page", json!({"page_id": page})).await,
+        (url.clone(), false)
+    );
+    let html = http().get(&url).send().await.unwrap().text().await.unwrap();
+    assert!(
+        html.contains("Gallery") && html.contains("Intro."),
+        "{html}"
+    );
+    let (_, shares) = get(&s, Some(&alice), &format!("/api/workspaces/{ws}/shares")).await;
+    assert_eq!(shares.as_array().unwrap().len(), 1);
+    assert_eq!(shares[0]["url"], url.as_str());
+    let (text, err) = c.call("share_page", json!({"page_id": page})).await;
+    assert!(err && text.contains("read-only"), "{text}");
+    let (text, err) = d.call("share_page", json!({"page_id": page})).await;
+    assert!(err && text.contains("not accessible"), "{text}");
+    let (_, err) = a.call("share_page", json!({"page_id": "nope"})).await;
+    assert!(err);
 }

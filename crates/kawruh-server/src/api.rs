@@ -5,7 +5,7 @@ use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use rand::RngCore;
-use rusqlite::params;
+use rusqlite::{Connection, params};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -15,6 +15,7 @@ use crate::auth::{self, AuthUser, PAT_PREFIX};
 use crate::db::{self, Role, User};
 use crate::docs::ORIGIN_SERVER;
 use crate::error::{ApiError, ApiResult};
+use crate::ratelimit::ClientIp;
 use crate::state::AppState;
 
 /// `Json` with rejections mapped to the API error format.
@@ -106,16 +107,41 @@ pub struct RegisterReq {
     username: String,
     password: String,
     display_name: Option<String>,
+    invite: Option<String>,
+}
+
+/// With sign-up closed, every account but the very first needs an invite
+/// code. A valid code is used up, so call this inside the transaction that
+/// creates the user; with `invite: None` it only checks.
+fn admit_signup(conn: &Connection, allow_signup: bool, invite: Option<&str>) -> ApiResult<()> {
+    if allow_signup || db::user_count(conn)? == 0 {
+        return Ok(());
+    }
+    let code = invite.ok_or_else(|| {
+        ApiError::forbidden("this server needs an invite code to sign up")
+            .with_code("invite_required")
+    })?;
+    if !db::consume_invite(conn, code, now_ms())? {
+        return Err(
+            ApiError::forbidden("the invite code is invalid, expired or already used")
+                .with_code("invite_invalid"),
+        );
+    }
+    Ok(())
 }
 
 pub async fn register(
     State(state): State<AppState>,
     Body(req): Body<RegisterReq>,
 ) -> ApiResult<Json<Value>> {
-    if !state.cfg.allow_signup {
-        return Err(
-            ApiError::forbidden("sign-up is disabled on this server").with_code("signup_disabled")
-        );
+    let invite = req
+        .invite
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .map(str::to_string);
+    if invite.is_none() {
+        admit_signup(&state.db.lock(), state.cfg.allow_signup, None)?;
     }
     let username = req.username.trim().to_lowercase();
     if !valid_username(&username) {
@@ -146,14 +172,17 @@ pub async fn register(
         display_name,
     };
     {
-        let conn = state.db.lock();
-        if db::user_by_username(&conn, &user.username)?.is_some() {
+        let mut conn = state.db.lock();
+        let tx = conn.transaction()?;
+        admit_signup(&tx, state.cfg.allow_signup, invite.as_deref())?;
+        if db::user_by_username(&tx, &user.username)?.is_some() {
             return Err(ApiError::conflict(
                 "username_taken",
                 "username is already taken",
             ));
         }
-        db::insert_user(&conn, &user, &hash)?;
+        db::insert_user(&tx, &user, &hash)?;
+        tx.commit()?;
     }
     let token = issue_session(&state, &user)?;
     Ok(Json(json!({ "token": token, "user": user })))
@@ -167,9 +196,13 @@ pub struct LoginReq {
 
 pub async fn login(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Body(req): Body<LoginReq>,
 ) -> ApiResult<Json<Value>> {
     let username = req.username.trim().to_lowercase();
+    if let Some(wait) = state.logins.blocked(&username, ip) {
+        return Err(ApiError::too_many_attempts(wait));
+    }
     let found = {
         let conn = state.db.lock();
         db::user_by_username(&conn, &username)?
@@ -181,14 +214,19 @@ pub async fn login(
             "wrong username or password",
         )
     };
-    let (user, hash) = found.ok_or_else(invalid)?;
+    let Some((user, hash)) = found else {
+        state.logins.record_failure(&username, ip);
+        return Err(invalid());
+    };
     let password = req.password.clone();
     let ok = tokio::task::spawn_blocking(move || auth::verify_password(&password, &hash))
         .await
         .map_err(ApiError::internal)?;
     if !ok {
+        state.logins.record_failure(&username, ip);
         return Err(invalid());
     }
+    state.logins.clear(&username);
     let token = issue_session(&state, &user)?;
     Ok(Json(json!({ "token": token, "user": user })))
 }
@@ -201,8 +239,47 @@ pub async fn logout(State(state): State<AppState>, me: AuthUser) -> ApiResult<Re
     Ok(no_content())
 }
 
-pub async fn me(me: AuthUser) -> Json<User> {
-    Json(me.user)
+/// The user plus their asset storage: bytes used across the workspaces they
+/// own, and the quota (0 = unlimited).
+pub async fn me(State(state): State<AppState>, me: AuthUser) -> ApiResult<Json<Value>> {
+    let used = crate::assets::owner_usage(&state, &me.user.id)?;
+    Ok(Json(json!({
+        "id": me.user.id,
+        "username": me.user.username,
+        "display_name": me.user.display_name,
+        "storage_used_bytes": used,
+        "storage_quota_bytes": state.cfg.quota_bytes(),
+    })))
+}
+
+// ---- invites ----------------------------------------------------------------
+
+pub async fn create_invite(State(state): State<AppState>, me: AuthUser) -> ApiResult<Json<Value>> {
+    let conn = state.db.lock();
+    let invite = db::create_invite(&conn, Some(&me.user.id), now_ms())?;
+    Ok(Json(
+        json!({ "code": invite.code, "expires_at": invite.expires_at }),
+    ))
+}
+
+pub async fn list_invites(
+    State(state): State<AppState>,
+    me: AuthUser,
+) -> ApiResult<Json<Vec<db::Invite>>> {
+    let conn = state.db.lock();
+    Ok(Json(db::invites_of(&conn, &me.user.id, now_ms())?))
+}
+
+pub async fn delete_invite(
+    State(state): State<AppState>,
+    me: AuthUser,
+    Path(code): Path<String>,
+) -> ApiResult<Response> {
+    let conn = state.db.lock();
+    if !db::delete_invite(&conn, &me.user.id, &code)? {
+        return Err(ApiError::not_found("invite_not_found", "invite not found"));
+    }
+    Ok(no_content())
 }
 
 // ---- personal access tokens -------------------------------------------------
@@ -479,20 +556,21 @@ pub struct ShareReq {
     page_id: String,
 }
 
-pub async fn create_share(
-    State(state): State<AppState>,
-    me: AuthUser,
-    Path(id): Path<String>,
-    Body(req): Body<ShareReq>,
-) -> ApiResult<Json<Value>> {
-    require_role(&state, &id, &me.user, Role::Editor)?;
+/// The share link of a live page, created when it has none. The caller
+/// checks the editor role.
+pub fn ensure_share(
+    state: &AppState,
+    workspace_id: &str,
+    page_id: &str,
+    user: &User,
+) -> ApiResult<db::Share> {
     let ws = state
         .docs
-        .get_or_load(&id, &id, false)
+        .get_or_load(workspace_id, workspace_id, false)
         .map_err(ApiError::internal)?;
     if !workspace::live_pages(&ws.doc)
         .iter()
-        .any(|p| p.id == req.page_id)
+        .any(|p| p.id == page_id)
     {
         return Err(ApiError::not_found(
             "page_not_found",
@@ -500,25 +578,33 @@ pub async fn create_share(
         ));
     }
     let conn = state.db.lock();
-    let existing = db::shares_of(&conn, &id)?
+    let existing = db::shares_of(&conn, workspace_id)?
         .into_iter()
-        .find(|s| s.page_id == req.page_id);
-    let share = match existing {
-        Some(s) => s,
-        None => {
-            let s = db::Share {
-                token: random_hex(16),
-                workspace_id: id.clone(),
-                page_id: req.page_id.clone(),
-                created_at: now_ms(),
-            };
-            conn.execute(
-                "INSERT INTO shares (token, workspace_id, page_id, created_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![s.token, s.workspace_id, s.page_id, me.user.id, s.created_at],
-            )?;
-            s
-        }
+        .find(|s| s.page_id == page_id);
+    if let Some(s) = existing {
+        return Ok(s);
+    }
+    let s = db::Share {
+        token: random_hex(16),
+        workspace_id: workspace_id.to_string(),
+        page_id: page_id.to_string(),
+        created_at: now_ms(),
     };
+    conn.execute(
+        "INSERT INTO shares (token, workspace_id, page_id, created_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![s.token, s.workspace_id, s.page_id, user.id, s.created_at],
+    )?;
+    Ok(s)
+}
+
+pub async fn create_share(
+    State(state): State<AppState>,
+    me: AuthUser,
+    Path(id): Path<String>,
+    Body(req): Body<ShareReq>,
+) -> ApiResult<Json<Value>> {
+    require_role(&state, &id, &me.user, Role::Editor)?;
+    let share = ensure_share(&state, &id, &req.page_id, &me.user)?;
     let mut v = share_json(&state, &share);
     if let Some(o) = v.as_object_mut() {
         o.remove("created_at");

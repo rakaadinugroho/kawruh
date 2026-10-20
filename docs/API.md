@@ -8,14 +8,53 @@ personal access token `kwr_…`). Errors: HTTP status + `{"error": "<message>", 
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | `/api/auth/register` | `{username, password, display_name?}` | `200 {token, user}` · `409 username_taken` · `403 signup_disabled` · `400 invalid` |
-| POST | `/api/auth/login` | `{username, password}` | `200 {token, user}` · `401 invalid_credentials` |
+| POST | `/api/auth/register` | `{username, password, display_name?, invite?}` | `200 {token, user}` · `409 username_taken` · `403 invite_required` · `403 invite_invalid` · `400 invalid` |
+| POST | `/api/auth/login` | `{username, password}` | `200 {token, user}` · `401 invalid_credentials` · `429 too_many_attempts` |
 | POST | `/api/auth/logout` | — | `204` (revokes the presented session token) |
-| GET | `/api/me` | — | `200 user` |
+| GET | `/api/me` | — | `200 {id, username, display_name, storage_used_bytes, storage_quota_bytes}` |
 
 `user` = `{id, username, display_name}`. Username: 3–32 chars `[a-z0-9_.-]` (lower-cased);
 password ≥ 8 chars. Passwords hashed with argon2id. Tokens are random 32 bytes,
 stored as SHA-256 hashes.
+
+`/api/me` also reports image storage: `storage_used_bytes` = bytes of the assets in all
+workspaces the caller owns, `storage_quota_bytes` = `KAWRUH_QUOTA_MB` in bytes (`0` = unlimited).
+
+### Sign-up and invites
+
+- `KAWRUH_ALLOW_SIGNUP=true` (default): anyone can register; `invite` is ignored.
+- `KAWRUH_ALLOW_SIGNUP=false`: registering needs a valid invite code. No `invite` →
+  `403 invite_required`; an unknown, expired, revoked or already used code → `403 invite_invalid`.
+  A valid code is used up in the same transaction that creates the account (a failed
+  registration, e.g. `409 username_taken`, does not use it).
+- The very first account on a server can always register, so a fresh server with sign-up
+  closed can be bootstrapped.
+
+Invite codes look like `KWR-7K3M-Q9XA` (no `0 O 1 I L`; case and surrounding spaces are
+ignored), work once and expire after 7 days. Any signed-in user (session or PAT) can make them:
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| POST | `/api/invites` | — | `200 {code, expires_at}` |
+| GET | `/api/invites` | — | `200 [{code, created_at, expires_at}]` — the caller's unused, unexpired codes |
+| DELETE | `/api/invites/:code` | — | `204` · `404 invite_not_found` (not one of the caller's codes) |
+
+From the server's shell, `kawruh-server admin invite` prints a fresh code that belongs to no
+user (it does not show up in anyone's list); it is safe to run while the server is up.
+Times are Unix milliseconds.
+
+### Login rate limiting
+
+After 10 failed logins within 15 minutes for the same username, or from the same client IP,
+further login attempts (even with the right password) get `429 too_many_attempts` with a
+`Retry-After: <seconds>` header until 15 minutes have passed since the first of those
+failures. A successful login clears that username's failures. The counters live in memory
+(bounded; reset on restart).
+
+The client IP is `CF-Connecting-IP` when present, else the first `X-Forwarded-For` entry,
+else the TCP peer address. Those headers are trusted as sent: when the server is reachable
+without a proxy that sets them, a client can fake its IP, but the per-username limit still
+applies.
 
 ## Personal access tokens (for MCP)
 
@@ -52,6 +91,11 @@ Roles: `owner` > `editor` > `viewer`.
 `url` = `KAWRUH_PUBLIC_URL + /s/<token>`. A revoked link (or a shared page that was
 deleted) also stops serving its assets.
 
+Pages link to each other in markdown as `[Title](kawruh://page/<page_id>)`. On a share page,
+a link to the shared page or one of its descendants points at that page within the share
+(`/s/<token>` or `/s/<token>/<page_id>`); a link to any other page keeps its text but loses
+the link. Share HTML never contains a `kawruh:` href.
+
 Share pages render a paragraph that holds only a link titled `kawruh:card` or
 `kawruh:preview` as a link card:
 
@@ -84,11 +128,15 @@ other workspaces are left as they are and do not load).
 
 | Method | Path | Body | Who | Response |
 |---|---|---|---|---|
-| PUT | `/api/workspaces/:id/assets/:name` | raw bytes | editor+ | `201 {name, size}` new · `200 {name, size}` already stored (idempotent) · `400 bad_hash` (sha256 of the body ≠ name) · `400 bad_name` · `413 too_large` (> `KAWRUH_MAX_ASSET_MB`) · `507 disk_full` (free disk < `KAWRUH_MIN_FREE_MB`) |
+| PUT | `/api/workspaces/:id/assets/:name` | raw bytes | editor+ | `201 {name, size}` new · `200 {name, size}` already stored (idempotent) · `400 bad_hash` (sha256 of the body ≠ name) · `400 bad_name` · `413 too_large` (> `KAWRUH_MAX_ASSET_MB`) · `413 quota_exceeded` (owner's `KAWRUH_QUOTA_MB` would be passed) · `507 disk_full` (free disk < `KAWRUH_MIN_FREE_MB`) |
 | GET | `/api/workspaces/:id/assets/:name` | — | member | `200` bytes · `404 not_found` · `400 bad_name` |
 
 Both take the usual bearer token (session or PAT); non-members get `403 forbidden`, an unknown
-workspace `404 workspace_not_found`. Responses carry `X-Content-Type-Options: nosniff` and
+workspace `404 workspace_not_found`.
+
+With `KAWRUH_QUOTA_MB` set, the assets of all workspaces a user owns share that quota, whoever
+uploads them: a new asset that would take the workspace owner's total past it is refused with
+`413 quota_exceeded`. Re-uploading an asset that is already stored is never refused. Responses carry `X-Content-Type-Options: nosniff` and
 `Cache-Control: private, max-age=31536000, immutable` (`public, …` on the share route).
 
 ## Health
@@ -127,6 +175,9 @@ edits are applied to the live documents and reach open editors immediately):
 | `rename_page` | `page_id`, `title` |
 | `move_page` | `page_id`, `parent_id?` (null/absent = root), `index?` |
 | `delete_page` | `page_id` (soft delete; restorable in the app's Trash) |
+| `upload_image` | `workspace_id`, `data_base64`, `mime` (png · jpeg · gif · webp · avif), `alt?`, `page_id?` — stores an asset (same limits and quota as `PUT`), returns `![alt](kawruh-asset://<workspace_id>/<name>)`; with `page_id` also appends it to that page |
+| `list_backlinks` | `page_id` — pages in the same workspace whose body links to it (`kawruh://page/<page_id>`) |
+| `share_page` | `page_id` — creates (or returns) the page's public share link and returns its `url` (editor+) |
 
 ## Server configuration (env)
 
@@ -135,6 +186,7 @@ edits are applied to the live documents and reach open editors immediately):
 | `KAWRUH_BIND` | `0.0.0.0:7420` |
 | `KAWRUH_DATA` | `./data` (SQLite at `<data>/kawruh.db`) |
 | `KAWRUH_PUBLIC_URL` | `http://localhost:7420` |
-| `KAWRUH_ALLOW_SIGNUP` | `true` |
+| `KAWRUH_ALLOW_SIGNUP` | `true` — `false` requires an invite code (except for the first account) |
 | `KAWRUH_MIN_FREE_MB` | `50` — below this, document writes are refused |
 | `KAWRUH_MAX_ASSET_MB` | `10` — largest accepted asset upload |
+| `KAWRUH_QUOTA_MB` | `0` (unlimited) — asset storage per workspace owner |
