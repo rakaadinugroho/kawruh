@@ -145,8 +145,18 @@ pub fn read(doc: &Doc) -> Vec<Comment> {
             _ => None,
         })
         .collect();
-    out.sort_by(|a, b| a.created.cmp(&b.created).then_with(|| a.id.cmp(&b.id)));
+    out.sort_by(|a, b| {
+        a.created
+            .cmp(&b.created)
+            .then_with(|| is_root(b).cmp(&is_root(a)))
+            .then_with(|| a.id.cmp(&b.id))
+    });
     out
+}
+
+/// Whether a comment starts its own thread.
+fn is_root(c: &Comment) -> bool {
+    c.thread.is_empty() || c.thread == c.id
 }
 
 /// The comments of a page, grouped into threads (root comment first, replies
@@ -156,7 +166,7 @@ pub fn threads(doc: &Doc) -> Vec<Vec<Comment>> {
     let mut roots: Vec<Comment> = Vec::new();
     let mut replies: Vec<Comment> = Vec::new();
     for c in all {
-        if c.thread.is_empty() || c.thread == c.id {
+        if is_root(&c) {
             roots.push(c);
         } else {
             replies.push(c);
@@ -227,6 +237,17 @@ mod tests {
         assert_eq!(threads[0][1].id, "c2");
         assert_eq!(threads[1].len(), 1);
         assert_eq!(threads[1][0].id, "c3");
+    }
+
+    #[test]
+    fn a_reply_never_jumps_above_its_root() {
+        // The same timestamp: the root still comes first, whatever the ids are.
+        let root = Comment::new("z", "Hello", "u1", "Alice", 10);
+        let reply = Comment::reply("a", "z", "z", "Hi", "u2", "Bob", 10);
+        let doc = doc_with(&[reply.clone(), root.clone()]);
+        let all = read(&doc);
+        assert_eq!(all[0], root);
+        assert_eq!(all[1], reply);
     }
 
     #[test]

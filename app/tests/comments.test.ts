@@ -30,6 +30,17 @@ it('comments round trip through the map', () => {
   expect(all[1].reply_to).toBe(root.id)
 })
 
+it('a reply never jumps above its root', () => {
+  const doc = new Y.Doc()
+  const root: Comment = { ...newComment('Hello', author), created: 10 }
+  const reply: Comment = { ...replyComment('Hi', { id: 'u2', name: 'Bob' }, root), created: 10 }
+  writeComment(doc, reply)
+  writeComment(doc, root)
+  const all = readComments(doc)
+  expect(all[0].id).toBe(root.id)
+  expect(all[1].id).toBe(reply.id)
+})
+
 it('the stored comment is the same shape the server reads', () => {
   const doc = new Y.Doc()
   const c = newComment('Hello', author)

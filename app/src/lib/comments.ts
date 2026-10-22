@@ -61,7 +61,18 @@ export function readComments(doc: Y.Doc): Comment[] {
       /* not one of ours */
     }
   })
-  return out.sort((a, b) => a.created - b.created || (a.id < b.id ? -1 : 1))
+  return out.sort(byAge)
+}
+
+/// Oldest first, and a root comment before the replies to it: two comments
+/// written in the same millisecond would otherwise be ordered by their random
+/// ids, and a reply could end up above the comment it answers.
+function byAge(a: Comment, b: Comment): number {
+  if (a.created !== b.created) return a.created - b.created
+  const aRoot = !a.thread || a.thread === a.id ? 0 : 1
+  const bRoot = !b.thread || b.thread === b.id ? 0 : 1
+  if (aRoot !== bRoot) return aRoot - bRoot
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
 /// The comments of a page grouped into threads: the root comment first, then
