@@ -8,6 +8,7 @@ people edit together live, read-only links can be shared, and AI agents can read
 and write pages over MCP.
 
 - **Link pages** with `[[`, and see what links back to each page.
+- **Graph view** (⌘⇧G) draws your pages as dots and the links between them as lines.
 - **Search** titles and page text with ⌘K.
 - **Templates** (daily note, meeting notes, your own) and **page history** with restore.
 - **Import** a Notion export or an Obsidian vault; **export** a workspace, a page

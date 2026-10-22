@@ -338,7 +338,8 @@ mod tests {
 
     #[test]
     fn linked_ids_stop_at_the_id_boundary() {
-        let md = "[A](kawruh://page/abc) [B](kawruh://page/abcd#x) kawruh://page/ [x](https://e.com)";
+        let md =
+            "[A](kawruh://page/abc) [B](kawruh://page/abcd#x) kawruh://page/ [x](https://e.com)";
         assert_eq!(linked_ids(md).collect::<Vec<_>>(), ["abc", "abcd"]);
     }
 
@@ -351,7 +352,10 @@ mod tests {
                 "abc",
                 "[D](kawruh://page/abcd) again [D](kawruh://page/abcd) [C](kawruh://page/c)",
             ),
-            ("abcd", "[me](kawruh://page/abcd) [gone](kawruh://page/gone)"),
+            (
+                "abcd",
+                "[me](kawruh://page/abcd) [gone](kawruh://page/gone)",
+            ),
             ("c", "[A](kawruh://page/abc), [Ax](kawruh://page/abcx)"),
         ]);
         let g = link_graph(&pages, |id| md.get(id).copied());

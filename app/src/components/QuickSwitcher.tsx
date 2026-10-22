@@ -110,7 +110,7 @@ export function QuickSwitcher({
           .map((p) => p.title || 'Untitled')
           .join(' / '),
       }))
-    if (q.length >= 2 && 'graph view'.includes(q)) pages.push({ kind: 'graph' })
+    if (q.length >= 2 && ['graph', 'graph view'].includes(q)) pages.push({ kind: 'graph' })
     const shown = new Set(pages.map((r) => (r.kind === 'page' ? r.page.id : '')))
     const byId = new Map(live.map((p) => [p.id, p]))
     for (const hit of hits) {
