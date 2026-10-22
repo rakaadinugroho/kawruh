@@ -339,7 +339,7 @@ impl KawruhMcp {
     }
 
     #[tool(
-        description = "Read a page: title, path and its body as markdown (GFM; ```mermaid fences are diagrams, ```kawruh-canvas fences are drawings, [Title](kawruh://page/<page_id>) links to another page)."
+        description = "Read a page: title, path and its body as markdown (GFM; ```mermaid fences are diagrams, ```kawruh-canvas fences are drawings, [Title](kawruh://page/<page_id>) links to another page). A database page reads as a table of its rows."
     )]
     async fn read_page(
         &self,
@@ -427,7 +427,7 @@ impl KawruhMcp {
     }
 
     #[tool(
-        description = "Create a page (optionally under a parent page) with an optional markdown body. Link to other pages with [Title](kawruh://page/<page_id>). Returns the new page id."
+        description = "Create a page (optionally under a parent page) with an optional markdown body. Link to other pages with [Title](kawruh://page/<page_id>). A body with a ```kawruh-database fence makes a database page. Returns the new page id."
     )]
     async fn create_page(
         &self,
@@ -482,7 +482,7 @@ impl KawruhMcp {
     }
 
     #[tool(
-        description = "Replace (default) or append to a page's markdown body. Link to other pages with [Title](kawruh://page/<page_id>). Edits appear live in open editors."
+        description = "Replace (default) or append to a page's markdown body. Link to other pages with [Title](kawruh://page/<page_id>). Edits appear live in open editors. A body with a ```kawruh-database fence writes a database page."
     )]
     async fn update_page(
         &self,
@@ -861,7 +861,9 @@ impl ServerHandler for KawruhMcp {
                 "Kawruh is a markdown notebook organised as workspaces containing a tree of pages. \
                  Use list_workspaces, then list_pages or search_pages to find page ids. Page bodies \
                  are GitHub-flavoured markdown; titles are separate (rename_page). Pages link to each \
-                 other with [Title](kawruh://page/<page_id>). Edits are live for everyone viewing the page.",
+                 other with [Title](kawruh://page/<page_id>). Edits are live for everyone viewing the page. \
+                 A page can be a database: put a ```kawruh-database block with its columns and rows in \
+                 the body, and read the rows back with query_database.",
             )
     }
 }
