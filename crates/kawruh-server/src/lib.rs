@@ -12,6 +12,7 @@ pub mod docs;
 pub mod error;
 pub mod gc;
 pub mod mcp;
+pub mod notify;
 pub mod ratelimit;
 pub mod share;
 pub mod state;
@@ -67,6 +68,8 @@ pub fn router(state: AppState) -> Router {
             "/api/workspaces/{id}/assets/{name}",
             get(assets::download).put(assets::upload),
         )
+        .route("/api/notifications", get(api::list_notifications))
+        .route("/api/notifications/read", post(api::read_notifications))
         .route("/api/shares/{token}", delete(api::delete_share))
         .route("/api/ws", get(ws::handler))
         .route("/s/{token}", get(share::root))

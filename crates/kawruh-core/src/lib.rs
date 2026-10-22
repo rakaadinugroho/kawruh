@@ -1,6 +1,7 @@
 //! Shared core of Kawruh: document model, markdown conversion, persistence
 //! and the sync protocol. Used by the desktop app and the server.
 
+pub mod comments;
 pub mod markdown;
 pub mod protocol;
 pub mod schema;

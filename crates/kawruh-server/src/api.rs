@@ -282,6 +282,38 @@ pub async fn delete_invite(
     Ok(no_content())
 }
 
+// ---- notifications ----------------------------------------------------------
+
+/// The user's notifications (mentions and replies), newest first.
+pub async fn list_notifications(
+    State(state): State<AppState>,
+    me: AuthUser,
+) -> ApiResult<Json<Value>> {
+    let conn = state.db.lock();
+    let items = db::notifications_of(&conn, &me.user.id, 100)?;
+    let unread = db::unread_count(&conn, &me.user.id)?;
+    Ok(Json(json!({ "items": items, "unread": unread })))
+}
+
+#[derive(Deserialize)]
+pub struct ReadReq {
+    /// The notifications to mark as read; empty means all of them.
+    #[serde(default)]
+    ids: Vec<String>,
+}
+
+/// Marks notifications as read.
+pub async fn read_notifications(
+    State(state): State<AppState>,
+    me: AuthUser,
+    Body(req): Body<ReadReq>,
+) -> ApiResult<Json<Value>> {
+    let conn = state.db.lock();
+    let n = db::mark_read(&conn, &me.user.id, &req.ids, now_ms())?;
+    let unread = db::unread_count(&conn, &me.user.id)?;
+    Ok(Json(json!({ "marked": n, "unread": unread })))
+}
+
 // ---- personal access tokens -------------------------------------------------
 
 pub async fn list_tokens(State(state): State<AppState>, me: AuthUser) -> ApiResult<Json<Value>> {

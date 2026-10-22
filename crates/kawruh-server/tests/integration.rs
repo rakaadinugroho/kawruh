@@ -652,9 +652,11 @@ async fn mcp_tools_edit_live_documents() {
     assert_eq!(
         names,
         [
+            "add_comment",
             "create_page",
             "delete_page",
             "list_backlinks",
+            "list_comments",
             "list_pages",
             "list_workspaces",
             "move_page",
@@ -781,6 +783,105 @@ async fn mcp_tools_edit_live_documents() {
     assert!(err && text.contains("read-only"), "{text}");
     let (read, err) = bob_mcp.call("read_page", json!({"page_id": page})).await;
     assert!(!err && read.contains("And more."), "{read}");
+}
+
+#[tokio::test]
+async fn mcp_comments_notify_the_people_they_mention() {
+    let s = start().await;
+    let (alice, _) = register(&s, "alice").await;
+    let (bob, bob_id) = register(&s, "bob").await;
+    let ws = create_workspace(&s, &alice, "Talk").await;
+    post(
+        &s,
+        &alice,
+        &format!("/api/workspaces/{ws}/members"),
+        json!({"username": "bob", "role": "editor"}),
+    )
+    .await;
+
+    let (_, pat) = post(&s, &alice, "/api/tokens", json!({"name": "agent"})).await;
+    let mut mcp = Mcp::connect(&s, pat["token"].as_str().unwrap()).await;
+    let (text, _) = mcp
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Draft", "markdown": "wording to check"}),
+        )
+        .await;
+    let page = extract_id(&text);
+
+    // Nobody has anything to look at yet.
+    let (status, box_) = get(&s, Some(&bob), "/api/notifications").await;
+    assert_eq!(status, 200);
+    assert_eq!(box_["unread"], 0, "{box_}");
+
+    let (text, err) = mcp
+        .call(
+            "add_comment",
+            json!({
+                "page_id": page,
+                "body": format!("does this read right? @[Bob](kawruh://user/{bob_id})")
+            }),
+        )
+        .await;
+    assert!(!err, "{text}");
+    let root = text
+        .split("Comment ID: ")
+        .nth(1)
+        .expect("the comment id comes back")
+        .trim()
+        .to_string();
+    assert!(!root.is_empty(), "{text}");
+
+    // The mention shows up in Bob's inbox and nowhere else.
+    let (_, box_) = get(&s, Some(&bob), "/api/notifications").await;
+    assert_eq!(box_["unread"], 1, "{box_}");
+    let first = &box_["items"][0];
+    assert_eq!(first["kind"], "mention", "{first}");
+    assert_eq!(first["page_id"], page.as_str());
+    assert!(
+        first["body"]
+            .as_str()
+            .unwrap()
+            .contains("does this read right?")
+    );
+    let (_, mine) = get(&s, Some(&alice), "/api/notifications").await;
+    assert_eq!(mine["unread"], 0, "{mine}");
+
+    // Reading it clears the badge; mentioning Bob again does not add another.
+    let (status, read) = post(&s, &bob, "/api/notifications/read", json!({})).await;
+    assert_eq!(status, 200);
+    assert_eq!(read["marked"], 1, "{read}");
+    assert_eq!(read["unread"], 0, "{read}");
+    mcp.call(
+        "add_comment",
+        json!({
+            "page_id": page,
+            "body": format!("bumping this @[Bob](kawruh://user/{bob_id})")
+        }),
+    )
+    .await;
+    let (_, box_) = get(&s, Some(&bob), "/api/notifications").await;
+    assert_eq!(box_["items"].as_array().unwrap().len(), 2);
+    assert_eq!(box_["unread"], 1, "{box_}");
+
+    // Bob's reply lands in the thread and notifies Alice back.
+    let (_, bob_pat) = post(&s, &bob, "/api/tokens", json!({"name": "bob"})).await;
+    let mut bob_mcp = Mcp::connect(&s, bob_pat["token"].as_str().unwrap()).await;
+    let (text, err) = bob_mcp
+        .call(
+            "add_comment",
+            json!({"page_id": page, "body": "reads fine to me", "reply_to": root}),
+        )
+        .await;
+    assert!(!err, "{text}");
+    let (_, box_) = get(&s, Some(&alice), "/api/notifications").await;
+    assert_eq!(box_["unread"], 1, "{box_}");
+    assert_eq!(box_["items"][0]["kind"], "reply", "{box_}");
+
+    let (text, err) = mcp.call("list_comments", json!({"page_id": page})).await;
+    assert!(!err, "{text}");
+    assert!(text.contains("reads fine to me"), "{text}");
+    assert!(text.contains("does this read right?"), "{text}");
 }
 
 #[tokio::test]

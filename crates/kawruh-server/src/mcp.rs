@@ -15,6 +15,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::Deserialize;
 
+use kawruh_core::comments;
 use kawruh_core::markdown;
 use kawruh_core::workspace;
 
@@ -122,6 +123,21 @@ pub struct UpdateArgs {
 pub struct RenameArgs {
     page_id: String,
     title: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct CommentArgs {
+    page_id: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct AddCommentArgs {
+    page_id: String,
+    /// The comment itself, as markdown. Mention someone with
+    /// @[Name](kawruh://user/<user_id>).
+    body: String,
+    /// The comment this one answers; omit it to start a new thread.
+    reply_to: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -626,6 +642,100 @@ impl KawruhMcp {
         let share = api::ensure_share(&self.state, &ws, &args.page_id, &user.user)
             .map_err(|e| e.message)?;
         Ok(self.state.share_url(&share.token))
+    }
+
+    #[tool(
+        description = "List the comments on a page as threads: the comment, who wrote it and when, and the replies under it."
+    )]
+    async fn list_comments(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<CommentArgs>,
+    ) -> ToolResult {
+        let user = caller(&parts)?;
+        let (ws, _) = self.locate(&args.page_id, &user)?;
+        let live = self
+            .state
+            .docs
+            .get_or_load(&args.page_id, &ws, false)
+            .map_err(|e| e.to_string())?;
+        let threads = comments::threads(&live.doc);
+        if threads.is_empty() {
+            return Ok(format!("No comments on page {}.", args.page_id));
+        }
+        let mut out = format!("Comments on page {}:\n", args.page_id);
+        for thread in threads {
+            let root = &thread[0];
+            if !root.quote.is_empty() {
+                out.push_str(&format!("> {}\n", root.quote.replace('\n', " ")));
+            }
+            for c in &thread {
+                let who = if c.author_name.is_empty() {
+                    "someone"
+                } else {
+                    &c.author_name
+                };
+                let marker = if c.id == root.id { "" } else { "  reply: " };
+                out.push_str(&format!("{marker}- {who}: {}\n", c.body.replace('\n', " ")));
+            }
+            out.push('\n');
+        }
+        Ok(out.trim_end().to_string())
+    }
+
+    #[tool(
+        description = "Write a comment on a page, or a reply in an existing thread. Mention someone with @[Name](kawruh://user/<user_id>); they get a notification. The comment appears live in open editors."
+    )]
+    async fn add_comment(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<AddCommentArgs>,
+    ) -> ToolResult {
+        let user = caller(&parts)?;
+        let (ws, _) = self.locate(&args.page_id, &user)?;
+        self.require_editor(&ws, &user)?;
+        let body = args.body.trim().to_string();
+        if body.is_empty() {
+            return Err("the comment is empty".into());
+        }
+        let live = self
+            .state
+            .docs
+            .get_or_load(&args.page_id, &ws, true)
+            .map_err(|e| e.to_string())?;
+        let now = workspace::now_ms();
+        let id = workspace::new_id();
+        let comment = match args.reply_to.as_deref().filter(|r| !r.is_empty()) {
+            Some(reply_to) => {
+                let all = comments::read(&live.doc);
+                let parent = all
+                    .iter()
+                    .find(|c| c.id == reply_to)
+                    .ok_or_else(|| format!("comment {reply_to} is not on this page"))?;
+                comments::Comment::reply(
+                    &id,
+                    &parent.thread,
+                    &parent.id,
+                    &body,
+                    &user.user.id,
+                    &user.user.display_name,
+                    now,
+                )
+            }
+            None => comments::Comment::new(&id, &body, &user.user.id, &user.user.display_name, now),
+        };
+        comments::write(&live.doc, &comment);
+        // Notify the people the comment is about right away; the index loop
+        // would do it a moment later.
+        {
+            let conn = self.state.db.lock();
+            crate::notify::sync_page_notifications(&conn, &ws, &args.page_id, &live.doc)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(format!(
+            "Commented on page {}.\nComment ID: {id}",
+            args.page_id
+        ))
     }
 }
 

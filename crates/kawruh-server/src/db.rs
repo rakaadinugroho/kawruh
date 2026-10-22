@@ -83,7 +83,23 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             name TEXT NOT NULL,
             since INTEGER NOT NULL,
             PRIMARY KEY (workspace_id, name)
-        );",
+        );
+        -- One row per (comment, recipient): a mention or a reply in a thread
+        -- someone else is part of.
+        CREATE TABLE IF NOT EXISTS notifications (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            page_id TEXT NOT NULL,
+            comment_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            body TEXT NOT NULL,
+            author TEXT NOT NULL,
+            author_name TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            read_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id, created_at);",
     )
 }
 
@@ -433,6 +449,138 @@ pub fn page_workspace(conn: &Connection, page_id: &str) -> rusqlite::Result<Opti
         |r| r.get(0),
     )
     .optional()
+}
+
+// ---- notifications ----------------------------------------------------------
+
+/// One thing a user should look at: a mention or a reply in a thread.
+#[derive(Debug, Clone, Serialize)]
+pub struct Notification {
+    pub id: String,
+    pub workspace_id: String,
+    pub page_id: String,
+    pub comment_id: String,
+    /// "mention" or "reply".
+    pub kind: String,
+    pub body: String,
+    pub author: String,
+    pub author_name: String,
+    pub created_at: i64,
+    /// When the user read it; null while unread.
+    pub read_at: Option<i64>,
+}
+
+/// A notification to record.
+pub struct NewNotification<'a> {
+    pub user_id: &'a str,
+    pub workspace_id: &'a str,
+    pub page_id: &'a str,
+    pub comment_id: &'a str,
+    /// "mention" or "reply".
+    pub kind: &'a str,
+    pub body: &'a str,
+    pub author: &'a str,
+    pub author_name: &'a str,
+    pub created_at: i64,
+}
+
+/// Records a notification for `user_id`, unless it is already there.
+/// The id is `<comment_id>:<user_id>`, so the same comment never notifies
+/// the same person twice.
+pub fn insert_notification(conn: &Connection, n: &NewNotification<'_>) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO notifications
+           (id, user_id, workspace_id, page_id, comment_id, kind, body, author, author_name, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            format!("{}:{}", n.comment_id, n.user_id),
+            n.user_id,
+            n.workspace_id,
+            n.page_id,
+            n.comment_id,
+            n.kind,
+            n.body,
+            n.author,
+            n.author_name,
+            n.created_at
+        ],
+    )?;
+    Ok(())
+}
+
+/// The notifications of a user, newest first.
+pub fn notifications_of(
+    conn: &Connection,
+    user_id: &str,
+    limit: usize,
+) -> rusqlite::Result<Vec<Notification>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, workspace_id, page_id, comment_id, kind, body, author, author_name, created_at, read_at
+         FROM notifications WHERE user_id = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![user_id, limit as i64], |r| {
+        Ok(Notification {
+            id: r.get(0)?,
+            workspace_id: r.get(1)?,
+            page_id: r.get(2)?,
+            comment_id: r.get(3)?,
+            kind: r.get(4)?,
+            body: r.get(5)?,
+            author: r.get(6)?,
+            author_name: r.get(7)?,
+            created_at: r.get(8)?,
+            read_at: r.get(9)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// How many notifications a user has not read.
+pub fn unread_count(conn: &Connection, user_id: &str) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM notifications WHERE user_id = ?1 AND read_at IS NULL",
+        [user_id],
+        |r| r.get(0),
+    )
+}
+
+/// Marks a user's notifications as read; `ids` empty means all of them.
+pub fn mark_read(
+    conn: &Connection,
+    user_id: &str,
+    ids: &[String],
+    now: i64,
+) -> rusqlite::Result<usize> {
+    if ids.is_empty() {
+        return conn.execute(
+            "UPDATE notifications SET read_at = ?2 WHERE user_id = ?1 AND read_at IS NULL",
+            params![user_id, now],
+        );
+    }
+    let mut n = 0;
+    for id in ids {
+        n += conn.execute(
+            "UPDATE notifications SET read_at = ?3
+             WHERE id = ?1 AND user_id = ?2 AND read_at IS NULL",
+            params![id, user_id, now],
+        )?;
+    }
+    Ok(n)
+}
+
+/// Removes the notifications of a comment (it was resolved or deleted).
+pub fn drop_comment_notifications(conn: &Connection, comment_id: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM notifications WHERE comment_id = ?1",
+        [comment_id],
+    )?;
+    Ok(())
+}
+
+/// Removes the notifications of a page (it was deleted).
+pub fn drop_page_notifications(conn: &Connection, page_id: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM notifications WHERE page_id = ?1", [page_id])?;
+    Ok(())
 }
 
 /// `(page_id, markdown)` of indexed, not deleted pages of a workspace whose

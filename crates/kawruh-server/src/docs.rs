@@ -411,6 +411,12 @@ pub fn reindex(reg: &DocRegistry, doc_id: &str, workspace_id: &str) -> Result<()
             meta.map(|p| p.deleted != 0),
         )
         .map_err(store::StoreError::from)?;
+        // Comments mention people and start threads; both become notifications.
+        if let Err(e) =
+            crate::notify::sync_page_notifications(&conn, workspace_id, doc_id, &live.doc)
+        {
+            tracing::warn!("notifications for {doc_id} failed: {e}");
+        }
     }
     Ok(())
 }
