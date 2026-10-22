@@ -2,6 +2,7 @@
 //! and the sync protocol. Used by the desktop app and the server.
 
 pub mod comments;
+pub mod database;
 pub mod markdown;
 pub mod protocol;
 pub mod schema;

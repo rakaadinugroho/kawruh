@@ -3,7 +3,8 @@
 //! Layout (mirrored by `app/src/lib/workspace.ts`):
 //! `meta: Map{ name }`
 //! `pages: Map<pageId, Map{ title, parent ("" = root), order (f64), icon,
-//!                          created (ms), deleted (ms, 0 = live) }>`
+//!                          created (ms), deleted (ms, 0 = live),
+//!                          kind ("" = page, "database" = database) }>`
 
 use std::collections::{HashMap, HashSet};
 
@@ -22,6 +23,8 @@ pub struct PageMeta {
     pub icon: String,
     pub created: i64,
     pub deleted: i64,
+    /// "database" for a database page; empty for an ordinary page.
+    pub kind: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -69,6 +72,7 @@ fn read_pages<T: ReadTxn>(pages: &MapRef, txn: &T) -> Vec<PageMeta> {
                 icon: str_of(&m, txn, "icon"),
                 created: num_of(&m, txn, "created") as i64,
                 deleted: num_of(&m, txn, "deleted") as i64,
+                kind: str_of(&m, txn, "kind"),
             }),
             _ => None,
         })
@@ -205,6 +209,7 @@ fn insert_page(
             ("icon", Any::from("")),
             ("created", Any::Number(yrs::any::Number::Int(now_ms()))),
             ("deleted", Any::Number(yrs::any::Number::Int(0))),
+            ("kind", Any::from("")),
         ]),
     );
 }
@@ -271,6 +276,12 @@ pub fn restore_page(doc: &Doc, id: &str, origin: &str) -> Result<(), TreeError> 
         "deleted",
         Any::Number(yrs::any::Number::Int(0)),
     )
+}
+
+/// Marks a page as a database (`kind` = "database") or back to an ordinary
+/// page (`kind` = ""). The page body is left alone either way.
+pub fn set_page_kind(doc: &Doc, id: &str, kind: &str, origin: &str) -> Result<(), TreeError> {
+    update_field(doc, id, origin, "kind", Any::from(kind))
 }
 
 /// Moves `id` under `parent` ("" = root) at sibling position `index` (end when None).
