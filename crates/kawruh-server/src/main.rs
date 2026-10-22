@@ -12,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("admin") {
         let db = kawruh_server::db::Db::open(&cfg.data_dir.join("kawruh.db"))?;
-        return kawruh_server::admin::run(&args[1..], &mut db.lock(), &cfg.data_dir);
+        return kawruh_server::admin::run(&args[1..], &db, &cfg.data_dir);
     }
 
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;

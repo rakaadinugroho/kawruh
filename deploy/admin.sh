@@ -4,6 +4,11 @@
 #   deploy/admin.sh list-users
 #   deploy/admin.sh invite                     prints a single-use sign-up code
 #   deploy/admin.sh delete-user <username>     (stops the service while it runs)
+#   deploy/admin.sh gc [--dry-run]             (stops the service while it runs)
+#
+# `gc` frees disk: images no page refers to any more and the documents of
+# pages purged from the trash. It keeps unreferenced images for a week first,
+# so a page can still be restored. Always try `--dry-run` first.
 #
 # Host: KAWRUH_HOST=user@host (deploy/.env.local is read if present).
 # Auth: SSH keys, or set KAWRUH_SSH_PASS to use sshpass.
@@ -18,7 +23,9 @@ if [[ -n "${KAWRUH_SSH_PASS:-}" ]]; then
 fi
 CMD=$(printf '%q ' "$@")
 STOP=false
-[[ "${1:-}" == "delete-user" ]] && STOP=true
+case "${1:-}" in
+  delete-user | gc) STOP=true ;;
+esac
 "${SSH[@]}" "$HOST" "STOP=$STOP bash -s -- $CMD" <<'REMOTE'
 set -euo pipefail
 $STOP && systemctl stop kawruh-server

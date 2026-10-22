@@ -1,5 +1,5 @@
 import { listen } from '@tauri-apps/api/event'
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { Onboarding } from './components/Onboarding'
 import { PageView } from './components/PageView'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -17,18 +17,22 @@ import { CHECK_EVERY_MS } from './lib/updater'
 import { currentWorkspace, useApp } from './lib/store'
 import { createPage } from './lib/workspace'
 
+const GraphView = lazy(() => import('./components/GraphView'))
+
 export default function App() {
   const {
     loaded,
     workspaces,
     workspaceId,
     pageId,
+    graphOpen,
     sidebarOpen,
     dialog,
     setDialog,
     refresh,
     selectWorkspace,
     openPage,
+    showGraph,
     toggleSidebar,
     setStatus,
     toast,
@@ -153,6 +157,9 @@ export default function App() {
       } else if (key === 'n' && !e.shiftKey && wsHandle && !readonly) {
         e.preventDefault()
         openPage(createPage(wsHandle.doc))
+      } else if (key === 'g' && e.shiftKey) {
+        e.preventDefault()
+        showGraph(!useApp.getState().graphOpen)
       } else if (key === '\\') {
         e.preventDefault()
         toggleSidebar()
@@ -163,7 +170,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [wsHandle, readonly, setDialog, openPage, toggleSidebar])
+  }, [wsHandle, readonly, setDialog, openPage, showGraph, toggleSidebar])
 
   if (!loaded) return <div data-tauri-drag-region className="h-full bg-paper" />
 
@@ -176,7 +183,13 @@ export default function App() {
       ) : (
         <div className="flex h-full">
           {sidebarOpen && <Sidebar handle={wsHandle} view={view} />}
-          <PageView wsHandle={wsHandle} view={view} />
+          {graphOpen && workspaceId ? (
+            <Suspense fallback={<main className="h-full flex-1 bg-paper" />}>
+              <GraphView key={workspaceId} workspaceId={workspaceId} view={view} currentId={pageId} />
+            </Suspense>
+          ) : (
+            <PageView wsHandle={wsHandle} view={view} />
+          )}
         </div>
       )}
       <QuickSwitcher
@@ -188,6 +201,7 @@ export default function App() {
         live={view.live}
         readonly={readonly}
         onOpen={(id) => openPage(id)}
+        onGraph={() => showGraph(true)}
       />
       <SettingsDialog
         open={dialog?.kind === 'settings'}

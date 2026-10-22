@@ -11,13 +11,14 @@ import {
   SquarePen,
   Trash2,
   Upload,
+  Waypoints,
 } from 'lucide-react'
 import type { DocHandle } from '../lib/docs'
 import type { WorkspaceView } from '../lib/hooks'
 import { type SyncState, type WorkspaceInfo, api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
 import { createPage } from '../lib/workspace'
-import { key, thisDevice } from '../lib/platform'
+import { graphKey, key, thisDevice } from '../lib/platform'
 import { PageTree } from './PageTree'
 import { IconButton, Kbd, Menu, type MenuItem, useMenuAnchor } from './ui'
 
@@ -90,8 +91,18 @@ export function StatusLine({ ws }: { ws: WorkspaceInfo }) {
 }
 
 export function Sidebar({ handle, view }: { handle: DocHandle | null; view: WorkspaceView }) {
-  const { workspaces, pageId, selectWorkspace, openPage, setDialog, toggleSidebar, toast, fail } =
-    useApp()
+  const {
+    workspaces,
+    pageId,
+    graphOpen,
+    selectWorkspace,
+    openPage,
+    showGraph,
+    setDialog,
+    toggleSidebar,
+    toast,
+    fail,
+  } = useApp()
   const ws = useApp(currentWorkspace)
   const switcher = useMenuAnchor()
   const readonly = ws?.role === 'viewer'
@@ -193,6 +204,20 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
           <Search size={14} className="text-ink-3" />
           <span className="flex-1 text-left">Search</span>
           <Kbd>{key('K')}</Kbd>
+        </button>
+        <button
+          type="button"
+          data-testid="graph-button"
+          aria-pressed={graphOpen}
+          onClick={() => showGraph(!graphOpen)}
+          disabled={!ws}
+          className={`press flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] hover:bg-hover ${
+            graphOpen ? 'bg-hover text-ink' : 'text-ink-2'
+          }`}
+        >
+          <Waypoints size={14} className={graphOpen ? 'text-ink' : 'text-ink-3'} />
+          <span className="flex-1 text-left">Graph</span>
+          <Kbd>{graphKey}</Kbd>
         </button>
         {!readonly && (
           <button

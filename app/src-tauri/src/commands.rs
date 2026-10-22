@@ -980,6 +980,15 @@ pub fn page_backlinks(
     state.search.backlinks(&state.hub, &workspace_id, &page_id)
 }
 
+/// The workspace's live pages and the page links between them.
+#[tauri::command]
+pub fn workspace_graph(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<crate::search::Graph> {
+    state.search.graph(&state.hub, &workspace_id)
+}
+
 #[tauri::command]
 pub fn page_history(
     state: State<'_, AppState>,

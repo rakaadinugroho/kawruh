@@ -1,11 +1,14 @@
 //! Operator commands run against the database directly:
-//! `kawruh-server admin list-users`, `kawruh-server admin delete-user <name>`
-//! and `kawruh-server admin invite`. Stop the service before `delete-user` so
-//! no live document is written back afterwards; `invite` is safe while it runs.
+//! `kawruh-server admin list-users`, `kawruh-server admin delete-user <name>`,
+//! `kawruh-server admin invite` and `kawruh-server admin gc [--dry-run]`.
+//! Stop the service before `delete-user` so no live document is written back
+//! afterwards; `invite` and `gc` are safe while it runs.
 
 use std::path::Path;
 
 use rusqlite::{Connection, params};
+
+use crate::db::Db;
 
 pub fn list_users(conn: &Connection) -> rusqlite::Result<Vec<(String, String, i64)>> {
     let mut stmt = conn.prepare(
@@ -55,10 +58,11 @@ pub fn delete_user(
     Ok(owned.len())
 }
 
-pub fn run(args: &[String], conn: &mut Connection, data_dir: &Path) -> anyhow::Result<()> {
+pub fn run(args: &[String], db: &Db, data_dir: &Path) -> anyhow::Result<()> {
     match args.first().map(String::as_str) {
         Some("list-users") => {
-            for (name, display, owned) in list_users(conn)? {
+            let conn = db.lock();
+            for (name, display, owned) in list_users(&conn)? {
                 println!("{name}\t{display}\t{owned} workspace(s)");
             }
             Ok(())
@@ -67,16 +71,30 @@ pub fn run(args: &[String], conn: &mut Connection, data_dir: &Path) -> anyhow::R
             let name = args
                 .get(1)
                 .ok_or_else(|| anyhow::anyhow!("usage: admin delete-user <username>"))?;
-            let n = delete_user(conn, data_dir, name)?;
+            let mut conn = db.lock();
+            let n = delete_user(&mut conn, data_dir, name)?;
             println!("deleted {name} and {n} owned workspace(s)");
             Ok(())
         }
         Some("invite") => {
-            println!("{}", create_invite(conn)?);
+            let conn = db.lock();
+            println!("{}", create_invite(&conn)?);
+            Ok(())
+        }
+        Some("gc") => {
+            let dry_run = args.iter().any(|a| a == "--dry-run");
+            let report = crate::gc::sweep(
+                db,
+                data_dir,
+                None,
+                kawruh_core::workspace::now_ms(),
+                dry_run,
+            )?;
+            print!("{}", report.render());
             Ok(())
         }
         _ => anyhow::bail!(
-            "usage: kawruh-server admin (list-users | delete-user <username> | invite)"
+            "usage: kawruh-server admin (list-users | delete-user <username> | invite | gc [--dry-run])"
         ),
     }
 }
@@ -128,5 +146,30 @@ mod tests {
             .unwrap();
         assert_eq!(docs, 0);
         assert!(delete_user(&mut conn, &dir, "nobody").is_err());
+    }
+
+    #[test]
+    fn gc_command_sweeps_without_touching_anything() {
+        let dir = std::env::temp_dir().join(format!("kawruh-admin-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(&dir.join("k.db")).unwrap();
+        // An image no page refers to.
+        let assets = crate::assets::workspace_dir(&dir, "w1");
+        std::fs::create_dir_all(&assets).unwrap();
+        let img = assets.join(format!("{}.png", "a".repeat(64)));
+        std::fs::write(&img, b"x").unwrap();
+
+        // A dry run reports it and leaves the file alone.
+        run(&["gc".to_string(), "--dry-run".to_string()], &db, &dir).unwrap();
+        assert!(img.exists());
+
+        // Without the flag it is marked, and only deleted after the grace period.
+        run(&["gc".to_string()], &db, &dir).unwrap();
+        assert!(img.exists());
+        let orphans: i64 = db
+            .lock()
+            .query_row("SELECT COUNT(*) FROM orphan_assets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(orphans, 1);
     }
 }

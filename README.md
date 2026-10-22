@@ -123,11 +123,18 @@ KAWRUH_SSH_PASS=… deploy/deploy.sh --rollback
 KAWRUH_SSH_PASS=… deploy/admin.sh list-users
 KAWRUH_SSH_PASS=… deploy/admin.sh invite                # prints a sign-up code
 KAWRUH_SSH_PASS=… deploy/admin.sh delete-user <name>   # also removes workspaces they own
+KAWRUH_SSH_PASS=… deploy/admin.sh gc --dry-run         # what cleanup would remove
+KAWRUH_SSH_PASS=… deploy/admin.sh gc                    # frees disk now
 curl http://<host>:7420/api/health
 ```
 
 The scripts deploy to `KAWRUH_HOST` (`user@host`); put it in `deploy/.env.local`
 (gitignored) so you don't have to type it.
+
+`gc` is the disk cleanup: it deletes images no page refers to any more and the
+documents of pages purged from the trash. An image is kept for a week after it
+stops being used, so a page can still be restored in the meantime. The server
+does the same on its own, 10 minutes after start and then once a day.
 
 Config lives in `/etc/kawruh/kawruh.env`, data in `/var/lib/kawruh`. For a server
 others can reach:
@@ -156,8 +163,8 @@ It is compiled out of release builds.
 - Tested on macOS. Windows builds and passes tests in CI but hasn't been tried on a
   real machine; its title bar keeps the macOS traffic-light gutter.
 - Permissions are per workspace (owner / editor / viewer), not per page.
-- Images up to 10 MB each (PNG, JPEG, GIF, WebP, AVIF). They aren't removed from
-  the server when a page stops using them.
+- Images up to 10 MB each (PNG, JPEG, GIF, WebP, AVIF). The server deletes the
+  ones no page uses any more, but only after a week.
 - The server speaks plain HTTP: use it on your LAN or over Tailscale. Exposing it
   publicly needs HTTPS in front (e.g. a Cloudflare tunnel).
 - Server tokens are stored unencrypted in the app's local database.

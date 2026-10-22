@@ -1,13 +1,15 @@
-import { CornerDownLeft, FileText, SquarePen, TextSearch } from 'lucide-react'
+import { CornerDownLeft, FileText, SquarePen, TextSearch, Waypoints } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type * as Y from 'yjs'
 import { type SearchHit, api } from '../lib/ipc'
+import { graphKey } from '../lib/platform'
 import { type Page, createPage, pagePath } from '../lib/workspace'
 
 type Result =
   | { kind: 'page'; page: Page; path: string }
   | { kind: 'text'; page: Page; snippet: string }
   | { kind: 'create'; title: string }
+  | { kind: 'graph' }
 
 /// `text` with every query word wrapped in <mark>.
 function Highlight({ text, query }: { text: string; query: string }) {
@@ -30,8 +32,8 @@ function Highlight({ text, query }: { text: string; query: string }) {
   )
 }
 
-/// ⌘K: jump to any page by title, or create one. Deliberately not animated:
-/// it is opened from the keyboard many times a day.
+/// ⌘K: jump to any page by title, create one, or open the graph. Deliberately
+/// not animated: it is opened from the keyboard many times a day.
 export function QuickSwitcher({
   open,
   onClose,
@@ -41,6 +43,7 @@ export function QuickSwitcher({
   live,
   readonly,
   onOpen,
+  onGraph,
 }: {
   open: boolean
   onClose: () => void
@@ -50,6 +53,7 @@ export function QuickSwitcher({
   live: Page[]
   readonly: boolean
   onOpen: (id: string) => void
+  onGraph: () => void
 }) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -106,6 +110,7 @@ export function QuickSwitcher({
           .map((p) => p.title || 'Untitled')
           .join(' / '),
       }))
+    if (q.length >= 2 && 'graph view'.includes(q)) pages.push({ kind: 'graph' })
     const shown = new Set(pages.map((r) => (r.kind === 'page' ? r.page.id : '')))
     const byId = new Map(live.map((p) => [p.id, p]))
     for (const hit of hits) {
@@ -119,6 +124,7 @@ export function QuickSwitcher({
   const choose = (r: Result | undefined) => {
     if (!r) return
     if (r.kind === 'page' || r.kind === 'text') onOpen(r.page.id)
+    else if (r.kind === 'graph') onGraph()
     else if (doc) onOpen(createPage(doc, { title: r.title }))
     onClose()
   }
@@ -164,7 +170,7 @@ export function QuickSwitcher({
               <p className="px-3 py-6 text-center text-[13px] text-ink-3">No pages match.</p>
             )}
             {results.map((r, i) => (
-              <Fragment key={r.kind === 'create' ? 'create' : `${r.kind}-${r.page.id}`}>
+              <Fragment key={r.kind === 'create' || r.kind === 'graph' ? r.kind : `${r.kind}-${r.page.id}`}>
               {r.kind === 'text' && results[i - 1]?.kind !== 'text' && (
                 <div className="px-2.5 pt-2 pb-1 text-[11px] font-medium text-ink-3">In page text</div>
               )}
@@ -200,6 +206,14 @@ export function QuickSwitcher({
                       {r.page.title || 'Untitled'}
                     </span>
                     {r.path && <span className="truncate text-[12px] text-ink-3">{r.path}</span>}
+                  </>
+                ) : r.kind === 'graph' ? (
+                  <>
+                    <span className="flex w-5 justify-center text-ink-3">
+                      <Waypoints size={14} />
+                    </span>
+                    <span className="truncate text-ink">Graph view</span>
+                    <span className="text-[12px] text-ink-3">{graphKey}</span>
                   </>
                 ) : (
                   <>

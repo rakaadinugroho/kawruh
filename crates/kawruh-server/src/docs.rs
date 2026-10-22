@@ -152,11 +152,11 @@ struct DocEvent {
 }
 
 pub struct DocRegistry {
-    db: Db,
+    pub(crate) db: Db,
     docs: Mutex<HashMap<String, Arc<LiveDoc>>>,
     events: mpsc::UnboundedSender<DocEvent>,
     dirty: mpsc::UnboundedSender<(String, String)>,
-    data_dir: PathBuf,
+    pub(crate) data_dir: PathBuf,
     min_free_bytes: u64,
     disk_ok: AtomicBool,
     disk_checked_ms: AtomicU64,
@@ -179,6 +179,7 @@ impl DocRegistry {
         tokio::spawn(event_loop(reg.clone(), events_rx));
         tokio::spawn(index_loop(reg.clone(), dirty_rx));
         tokio::spawn(janitor(Arc::downgrade(&reg)));
+        tokio::spawn(crate::gc::run_periodically(Arc::downgrade(&reg)));
         reg
     }
 
@@ -278,6 +279,12 @@ impl DocRegistry {
 
     pub fn loaded(&self, doc_id: &str) -> Option<Arc<LiveDoc>> {
         self.docs.lock().unwrap().get(doc_id).cloned()
+    }
+
+    /// Runs `f` unless the document is loaded; it cannot be loaded meanwhile.
+    pub fn unless_loaded<R>(&self, doc_id: &str, f: impl FnOnce() -> R) -> Option<R> {
+        let docs = self.docs.lock().unwrap();
+        (!docs.contains_key(doc_id)).then(f)
     }
 
     /// Drops all live documents of a deleted workspace; pending writes are discarded.

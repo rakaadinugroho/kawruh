@@ -34,6 +34,11 @@ export type LinkMeta = {
 
 export type SearchHit = { id: string; title: string; snippet: string; inTitle: boolean }
 export type PageRef = { id: string; title: string }
+/// Live pages and the page links between them (see workspace_graph).
+export type GraphData = {
+  nodes: { id: string; title: string; icon: string }[]
+  edges: { from: string; to: string }[]
+}
 export type HistoryEntry = { id: number; ts: number; preview: string }
 
 /// One page laid out for PDF export (see page_print_data).
@@ -157,6 +162,7 @@ export const api = {
     invoke<SearchHit[]>('search_pages', { workspaceId, query }),
   pageBacklinks: (workspaceId: string, pageId: string) =>
     invoke<PageRef[]>('page_backlinks', { workspaceId, pageId }),
+  workspaceGraph: (workspaceId: string) => invoke<GraphData>('workspace_graph', { workspaceId }),
   pageHistory: (pageId: string) => invoke<HistoryEntry[]>('page_history', { pageId }),
   pageHistoryGet: (pageId: string, id: number) => invoke<string>('page_history_get', { pageId, id }),
   pageHistoryRestore: (workspaceId: string, pageId: string, id: number) =>

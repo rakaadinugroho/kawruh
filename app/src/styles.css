@@ -779,3 +779,76 @@ button {
     text-decoration: none;
   }
 }
+
+/* ----------------------------------------------------------------- graph */
+
+/* Pages as dots and links as lines (GraphView; d3 draws the SVG). Font size
+   and label halo width are set on the labels' group as the zoom changes. */
+.kw-graph {
+  touch-action: none;
+}
+.kw-edge {
+  stroke: color-mix(in oklch, var(--ink-3) 55%, transparent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  transition: opacity 150ms, stroke 150ms;
+}
+.kw-edge.tree {
+  stroke: color-mix(in oklch, var(--ink-3) 40%, transparent);
+  stroke-dasharray: 3 3;
+}
+.kw-node {
+  fill: var(--ink-3);
+  /* A wider, invisible ring so small dots are easy to hover and drag. */
+  stroke: transparent;
+  stroke-width: 6;
+  transition: opacity 150ms, fill 150ms;
+}
+.kw-node.orphan {
+  opacity: 0.45;
+}
+.kw-node.current {
+  fill: var(--accent);
+  stroke: var(--accent-soft);
+}
+.kw-node.hover {
+  fill: var(--accent);
+}
+.kw-label {
+  fill: var(--ink-2);
+  font-family: var(--font-sans);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-linejoin: round;
+  pointer-events: none;
+  transition: opacity 150ms;
+}
+.kw-label.hide {
+  display: none;
+}
+.kw-label.current {
+  fill: var(--accent);
+  font-weight: 600;
+}
+.kw-graph[data-focus] .kw-node:not(.lit),
+.kw-graph[data-focus] .kw-label:not(.lit) {
+  opacity: 0.18;
+}
+.kw-graph[data-focus] .kw-edge:not(.lit) {
+  opacity: 0.12;
+}
+.kw-graph[data-focus] .kw-edge.lit {
+  stroke: var(--accent);
+}
+.kw-graph[data-focus] .kw-label.lit {
+  display: inline;
+  fill: var(--ink);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kw-edge,
+  .kw-node,
+  .kw-label {
+    transition: none;
+  }
+}

@@ -10,6 +10,7 @@ pub mod db;
 pub mod disk;
 pub mod docs;
 pub mod error;
+pub mod gc;
 pub mod mcp;
 pub mod ratelimit;
 pub mod share;

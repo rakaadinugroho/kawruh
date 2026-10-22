@@ -76,6 +76,13 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             created_by TEXT REFERENCES users(id) ON DELETE CASCADE,
             created_at INTEGER NOT NULL,
             expires_at INTEGER NOT NULL
+        );
+        -- Stored assets no document refers to, and since when (see gc.rs).
+        CREATE TABLE IF NOT EXISTS orphan_assets (
+            workspace_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            since INTEGER NOT NULL,
+            PRIMARY KEY (workspace_id, name)
         );",
     )
 }

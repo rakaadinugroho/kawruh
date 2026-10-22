@@ -48,6 +48,26 @@ pub struct PageRef {
     pub title: String,
 }
 
+#[derive(Debug, Serialize, PartialEq)]
+pub struct GraphNode {
+    pub id: String,
+    pub title: String,
+    pub icon: String,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct GraphEdge {
+    pub from: String,
+    pub to: String,
+}
+
+/// Live pages and the links between them, for the graph view.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct Graph {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+}
+
 impl SearchIndex {
     /// A document changed; re-read it on the next query.
     pub fn mark(&self, doc_id: &str) {
@@ -149,6 +169,59 @@ impl SearchIndex {
             })
             .collect())
     }
+
+    /// Every live page, and an edge for each page that links to another.
+    pub fn graph(&self, hub: &DocHub, workspace_id: &str) -> Result<Graph> {
+        let ws = hub.get_or_load(workspace_id, workspace_id)?;
+        let pages = workspace::live_pages(&ws);
+        self.refresh(hub, workspace_id, &pages)?;
+        let cache = self.cache.lock().unwrap();
+        Ok(link_graph(&pages, |id| {
+            cache.get(id).map(|c| c.markdown.as_str())
+        }))
+    }
+}
+
+/// Nodes for `pages` and one edge per distinct link from one of them to
+/// another (links to itself or to pages not in `pages` are left out).
+fn link_graph<'a>(pages: &[PageMeta], markdown_of: impl Fn(&str) -> Option<&'a str>) -> Graph {
+    let live: HashSet<&str> = pages.iter().map(|p| p.id.as_str()).collect();
+    let mut edges = Vec::new();
+    for page in pages {
+        let Some(markdown) = markdown_of(&page.id) else {
+            continue;
+        };
+        let mut seen = HashSet::new();
+        for to in linked_ids(markdown) {
+            if to != page.id && live.contains(to) && seen.insert(to) {
+                edges.push(GraphEdge {
+                    from: page.id.clone(),
+                    to: to.to_string(),
+                });
+            }
+        }
+    }
+    let nodes = pages
+        .iter()
+        .map(|p| GraphNode {
+            id: p.id.clone(),
+            title: p.title.clone(),
+            icon: p.icon.clone(),
+        })
+        .collect();
+    Graph { nodes, edges }
+}
+
+/// The page id of every page link in `markdown`, in order: the letters and
+/// digits after the prefix, the same boundary `links_to` uses.
+fn linked_ids(markdown: &str) -> impl Iterator<Item = &str> {
+    markdown.match_indices(PAGE_LINK).filter_map(|(i, _)| {
+        let rest = &markdown[i + PAGE_LINK.len()..];
+        let end = rest
+            .find(|c: char| !c.is_ascii_alphanumeric())
+            .unwrap_or(rest.len());
+        (end > 0).then(|| &rest[..end])
+    })
 }
 
 /// True when `markdown` has a link to exactly `target` (not to a page whose id
@@ -242,5 +315,55 @@ mod tests {
         assert!(links_to(md, "kawruh://page/abc"));
         assert!(links_to(md, "kawruh://page/abcd"));
         assert!(!links_to("[A](kawruh://page/abcd)", "kawruh://page/abc"));
+    }
+
+    fn meta(id: &str) -> PageMeta {
+        PageMeta {
+            id: id.into(),
+            title: id.to_uppercase(),
+            parent: String::new(),
+            order: 0.0,
+            icon: String::new(),
+            created: 0,
+            deleted: 0,
+        }
+    }
+
+    fn edges(g: &Graph) -> Vec<(&str, &str)> {
+        g.edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn linked_ids_stop_at_the_id_boundary() {
+        let md = "[A](kawruh://page/abc) [B](kawruh://page/abcd#x) kawruh://page/ [x](https://e.com)";
+        assert_eq!(linked_ids(md).collect::<Vec<_>>(), ["abc", "abcd"]);
+    }
+
+    #[test]
+    fn graph_edges_are_distinct_links_between_live_pages() {
+        // "gone" is not live (deleted); "abcd" is live but "abc" only prefixes it.
+        let pages = [meta("abc"), meta("abcd"), meta("c")];
+        let md: HashMap<&str, &str> = HashMap::from([
+            (
+                "abc",
+                "[D](kawruh://page/abcd) again [D](kawruh://page/abcd) [C](kawruh://page/c)",
+            ),
+            ("abcd", "[me](kawruh://page/abcd) [gone](kawruh://page/gone)"),
+            ("c", "[A](kawruh://page/abc), [Ax](kawruh://page/abcx)"),
+        ]);
+        let g = link_graph(&pages, |id| md.get(id).copied());
+        assert_eq!(g.nodes.len(), 3);
+        assert_eq!(g.nodes[0].title, "ABC");
+        assert_eq!(edges(&g), [("abc", "abcd"), ("abc", "c"), ("c", "abc")]);
+    }
+
+    #[test]
+    fn graph_of_pages_without_text_has_no_edges() {
+        let g = link_graph(&[meta("a")], |_| None);
+        assert_eq!(g.nodes.len(), 1);
+        assert!(g.edges.is_empty());
     }
 }

@@ -21,6 +21,8 @@ type State = {
   accounts: Account[]
   workspaceId: string | null
   pageId: string | null
+  /// The graph view shows in place of the page.
+  graphOpen: boolean
   sidebarOpen: boolean
   dialog: DialogName
   toasts: Toast[]
@@ -31,6 +33,7 @@ type State = {
   refresh: () => Promise<void>
   selectWorkspace: (id: string) => void
   openPage: (id: string | null) => void
+  showGraph: (open: boolean) => void
   setDialog: (d: DialogName) => void
   toggleSidebar: () => void
   setStatus: (workspaceId: string, status: WorkspaceInfo['status']) => void
@@ -54,6 +57,7 @@ export const useApp = create<State>((set, get) => ({
   accounts: [],
   workspaceId: null,
   pageId: null,
+  graphOpen: false,
   sidebarOpen: true,
   dialog: null,
   toasts: [],
@@ -76,11 +80,12 @@ export const useApp = create<State>((set, get) => ({
   },
 
   openPage: (id) => {
-    set({ pageId: id })
+    set({ pageId: id, graphOpen: false })
     const ws = get().workspaceId
     if (ws && id) remember(`lastPage:${ws}`, id)
   },
 
+  showGraph: (graphOpen) => set({ graphOpen }),
   setDialog: (dialog) => set({ dialog }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 
