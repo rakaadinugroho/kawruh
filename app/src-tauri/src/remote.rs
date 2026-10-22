@@ -66,6 +66,40 @@ pub struct ApiToken {
     pub token: Option<String>,
 }
 
+/// A mention or a reply the user should look at.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct Notification {
+    pub id: String,
+    pub workspace_id: String,
+    pub page_id: String,
+    pub comment_id: String,
+    /// "mention" or "reply".
+    pub kind: String,
+    pub body: String,
+    pub author: String,
+    pub author_name: String,
+    pub created_at: i64,
+    #[serde(default)]
+    pub read_at: Option<i64>,
+}
+
+/// The user's inbox: the notifications and how many are unread.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct Inbox {
+    pub items: Vec<Notification>,
+    pub unread: i64,
+}
+
+/// How many notifications were marked as read.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct ReadResult {
+    pub marked: usize,
+    pub unread: i64,
+}
+
 async fn remote_error(res: reqwest::Response) -> Error {
     let status = res.status();
     let body: Value = res.json().await.unwrap_or_default();
@@ -352,6 +386,29 @@ impl Remote {
             &format!("/api/tokens/{id}"),
             Some(token),
             None,
+        )
+        .await
+    }
+
+    /// The user's notifications (mentions and replies) and how many are unread.
+    pub async fn notifications(&self, server: &str, token: &str) -> Result<Inbox> {
+        self.call(Method::GET, server, "/api/notifications", Some(token), None)
+            .await
+    }
+
+    /// Marks notifications as read; an empty list marks all of them.
+    pub async fn read_notifications(
+        &self,
+        server: &str,
+        token: &str,
+        ids: &[String],
+    ) -> Result<ReadResult> {
+        self.call(
+            Method::POST,
+            server,
+            "/api/notifications/read",
+            Some(token),
+            Some(json!({ "ids": ids })),
         )
         .await
     }

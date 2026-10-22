@@ -68,6 +68,23 @@ export type ApiToken = {
 export type DocEvent = { type: 'update' | 'awareness'; update: string }
 export type AppInfo = { version: string; dataDir: string }
 
+/// A mention or a reply the user should look at.
+export type Notification = {
+  id: string
+  workspaceId: string
+  pageId: string
+  commentId: string
+  kind: 'mention' | 'reply'
+  body: string
+  author: string
+  authorName: string
+  createdAt: number
+  readAt: number | null
+}
+
+/// The account's inbox.
+export type Inbox = { items: Notification[]; unread: number }
+
 export type CommandError = { message: string; code: string }
 
 export function errorMessage(e: unknown): string {
@@ -120,6 +137,12 @@ export const api = {
     invoke<ApiToken>('token_create', { accountId, name }),
   deleteToken: (accountId: string, tokenId: string) =>
     invoke<void>('token_delete', { accountId, tokenId }),
+
+  /// The account's inbox: mentions and replies, newest first.
+  notificationsList: (accountId: string) => invoke<Inbox>('notifications_list', { accountId }),
+  /// Marks notifications as read; an empty list marks all of them.
+  notificationsRead: (accountId: string, ids: string[]) =>
+    invoke<{ marked: number; unread: number }>('notifications_read', { accountId, ids }),
 
   docOpen: (docId: string, workspaceId: string, channel: Channel<DocEvent>) =>
     invoke<{ view: number; state: string }>('doc_open', { docId, workspaceId, channel }),

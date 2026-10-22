@@ -13,7 +13,9 @@ use crate::assets;
 use crate::db::{self, Account, WorkspaceRow};
 use crate::error::{Error, Result};
 use crate::hub::{DocEvent, DocHub, ORIGIN_LOCAL};
-use crate::remote::{ApiToken, Member, Remote, RemoteWorkspace, Share, normalize_server};
+use crate::remote::{
+    ApiToken, Inbox, Member, ReadResult, Remote, RemoteWorkspace, Share, normalize_server,
+};
 use crate::sync::SyncManager;
 use crate::transfer;
 
@@ -415,6 +417,29 @@ pub async fn share_delete(
 pub async fn tokens_list(state: State<'_, AppState>, account_id: String) -> Result<Vec<ApiToken>> {
     let a = state.account(&account_id)?;
     state.remote.tokens(&a.server_url, &a.token).await
+}
+
+// ------------------------------------------------------------- notifications
+
+/// The account's inbox: mentions and replies, newest first.
+#[tauri::command]
+pub async fn notifications_list(state: State<'_, AppState>, account_id: String) -> Result<Inbox> {
+    let a = state.account(&account_id)?;
+    state.remote.notifications(&a.server_url, &a.token).await
+}
+
+/// Marks notifications as read; an empty list marks all of them.
+#[tauri::command]
+pub async fn notifications_read(
+    state: State<'_, AppState>,
+    account_id: String,
+    ids: Vec<String>,
+) -> Result<ReadResult> {
+    let a = state.account(&account_id)?;
+    state
+        .remote
+        .read_notifications(&a.server_url, &a.token, &ids)
+        .await
 }
 
 /// An invite code for this account's server, for someone to sign up with.

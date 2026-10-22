@@ -6,6 +6,7 @@ import {
   History,
   FilePlus2,
   FileText,
+  MessageSquare,
   MoreHorizontal,
   PanelLeftOpen,
   RotateCcw,
@@ -16,13 +17,15 @@ import {
   Upload,
 } from 'lucide-react'
 import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { EditorView } from '@milkdown/kit/prose/view'
 import { Editor } from '../editor/Editor'
+import { CommentPanel } from './CommentPanel'
 import { HistoryDialog } from './HistoryDialog'
 import type { DocHandle } from '../lib/docs'
 import { type WorkspaceView, colorFor, useDoc, usePeers } from '../lib/hooks'
 import { type PageRef, api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
-import { isMac, key } from '../lib/platform'
+import { commentsKey, isMac, key } from '../lib/platform'
 import {
   type Page,
   childrenOf,
@@ -137,11 +140,15 @@ function TitleInput({ value, readonly, onChange, onEnter }: {
 
 export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view: WorkspaceView }) {
   const { pageId, openPage, sidebarOpen, toggleSidebar, setDialog, accounts, fail, toast } = useApp()
+  const commentsOpen = useApp((s) => s.commentsOpen)
+  const showComments = useApp((s) => s.showComments)
+  const focusCommentId = useApp((s) => s.focusCommentId)
   const ws = useApp(currentWorkspace)
   const page = view.all.find((p) => p.id === pageId) ?? null
   const handle = useDoc(page ? page.id : null, ws?.id ?? null)
   const [canvasId, setCanvasId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [editorView, setEditorView] = useState<EditorView | null>(null)
   const more = useMenuAnchor()
   const iconMenu = useMenuAnchor()
   const readonly = ws?.role === 'viewer'
@@ -149,6 +156,10 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
   const trail = useMemo(() => (page ? pagePath(view.all, page.id) : []), [view.all, page])
   const children = useMemo(() => (page ? childrenOf(view.live, page.id) : []), [view.live, page])
   const inTrash = page ? !view.live.some((p) => p.id === page.id) : false
+
+  useEffect(() => {
+    setEditorView(null)
+  }, [pageId])
 
   // Name and color shown on our cursor to collaborators. Docs start with a null
   // awareness state (nothing to announce) and setLocalStateField is a no-op on
@@ -262,6 +273,17 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
           </Button>
         )}
         {page && (
+          <IconButton
+            label={`Comments (${commentsKey})`}
+            onClick={() => showComments(!commentsOpen)}
+            aria-pressed={commentsOpen}
+            className={commentsOpen ? 'bg-hover text-ink' : ''}
+            data-testid="comments-button"
+          >
+            <MessageSquare size={15} />
+          </IconButton>
+        )}
+        {page && (
           <IconButton label="Page actions" onClick={(e) => more.openFrom(e.currentTarget)} data-testid="page-menu">
             <MoreHorizontal size={16} />
           </IconButton>
@@ -310,7 +332,8 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
         />
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto" data-testid="page-scroll">
+      <div className="flex min-h-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto" data-testid="page-scroll">
         {!page ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 pb-24 text-center">
             <p className="font-serif text-[22px] text-ink-2">Nothing open.</p>
@@ -438,7 +461,25 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
             )}
           </article>
         )}
-      </div>
+        </div>
+
+        {commentsOpen && ws && page && handle && (
+          <CommentPanel
+            handle={handle}
+            workspaceId={ws.id}
+            readonly={readonly}
+            author={
+              account
+                ? { id: account.userId, name: account.displayName || account.username }
+                : // A workspace only on this device still has someone writing.
+                  { id: 'local', name: 'You' }
+            }
+            editorView={editorView}
+            focusCommentId={focusCommentId}
+            onClose={() => showComments(false)}
+          />
+        )}
+        </div>
 
       {ws && page && (
         <HistoryDialog

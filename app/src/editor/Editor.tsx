@@ -21,6 +21,7 @@ import { api } from '../lib/ipc'
 import { useApp } from '../lib/store'
 import { type Page, newId } from '../lib/workspace'
 import { canvasView } from './canvas-view'
+import { commentAnchors } from './comment'
 import { ensureMeta, readMeta } from './link-meta'
 import { linkCardView } from './link-view'
 import { renderMermaidPreview } from './mermaid'
@@ -44,6 +45,9 @@ type Props = {
   pages: Page[]
   onOpenCanvas: (canvasId: string) => void
   onOpenPage: (pageId: string) => void
+  /// Hands the editor view to the outside, so a comment can be about the
+  /// current selection. Called with null when the editor goes away.
+  onView?: (view: EditorView | null) => void
 }
 
 /// Stores pasted or dropped image files and returns image nodes for them.
@@ -68,11 +72,13 @@ async function uploadImages(files: FileList, workspaceId: string, imageNode: (sr
 }
 
 /// Milkdown Crepe bound to the page's Y.Doc (prosemirror fragment + awareness).
-export function Editor({ handle, workspaceId, readonly, pages, onOpenCanvas, onOpenPage }: Props) {
+export function Editor({ handle, workspaceId, readonly, pages, onOpenCanvas, onOpenPage, onView }: Props) {
   const root = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<Crepe | null>(null)
   const openCanvas = useRef(onOpenCanvas)
   openCanvas.current = onOpenCanvas
+  const giveView = useRef(onView)
+  giveView.current = onView
   // Creation is async; the role may change meanwhile, so read it when done.
   const readonlyRef = useRef(readonly)
   readonlyRef.current = readonly
@@ -169,6 +175,7 @@ export function Editor({ handle, workspaceId, readonly, pages, onOpenCanvas, onO
         .use(kawruhSchema)
         .use(canvasView(handle.doc, (id) => openCanvas.current(id)))
         .use(linkCardView(handle.doc, canWrite))
+        .use(commentAnchors(handle.doc))
         .use(
           pasteLink({
             onPaste: (p) => {
@@ -200,6 +207,7 @@ export function Editor({ handle, workspaceId, readonly, pages, onOpenCanvas, onO
           .connect()
       })
       crepe.setReadonly(readonlyRef.current)
+      giveView.current?.(crepe.editor.action((ctx) => ctx.get(editorViewCtx)))
       // Dev builds expose the editor to the E2E automation hook.
       if (import.meta.env.DEV) (window as unknown as { __kawruhEditor: Crepe }).__kawruhEditor = crepe
     })()
@@ -207,6 +215,7 @@ export function Editor({ handle, workspaceId, readonly, pages, onOpenCanvas, onO
     return () => {
       disposed = true
       crepeRef.current = null
+      giveView.current?.(null)
       ready.finally(() => crepe.destroy())
     }
     // The editor is rebuilt only for a different document.

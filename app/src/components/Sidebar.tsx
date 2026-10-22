@@ -1,4 +1,5 @@
 import {
+  AtSign,
   Check,
   ChevronsUpDown,
   CloudDownload,
@@ -18,6 +19,7 @@ import type { WorkspaceView } from '../lib/hooks'
 import { type SyncState, type WorkspaceInfo, api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
 import { createPage } from '../lib/workspace'
+import { useInbox } from '../lib/inbox'
 import { graphKey, key, thisDevice } from '../lib/platform'
 import { PageTree } from './PageTree'
 import { IconButton, Kbd, Menu, type MenuItem, useMenuAnchor } from './ui'
@@ -106,6 +108,8 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
   const ws = useApp(currentWorkspace)
   const switcher = useMenuAnchor()
   const readonly = ws?.role === 'viewer'
+  const inbox = useInbox((s) => (ws?.accountId ? s.byAccount[ws.accountId] : undefined))
+  const showInbox = useInbox((s) => s.show)
 
   const importNotes = async () => {
     if (!ws) return
@@ -264,6 +268,21 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
 
       <div className="flex shrink-0 flex-col gap-1 border-t border-line px-2 py-2">
         <UpdateBanner />
+        <button
+          type="button"
+          data-testid="inbox-button"
+          onClick={() => showInbox(true)}
+          disabled={!ws?.accountId}
+          className="press flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] text-ink-2 hover:bg-hover disabled:opacity-45"
+        >
+          <AtSign size={14} className="text-ink-3" />
+          <span className="flex-1 text-left">Inbox</span>
+          {inbox && inbox.unread > 0 && (
+            <span className="rounded-full bg-accent px-1.5 text-[10px] font-semibold text-accent-ink tabular-nums">
+              {inbox.unread}
+            </span>
+          )}
+        </button>
         <button
           type="button"
           onClick={() => setDialog({ kind: 'trash' })}

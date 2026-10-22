@@ -9,3 +9,6 @@ export const key = (k: string) => (isMac ? `⌘${k}` : `Ctrl+${k}`)
 
 /// The graph view's shortcut label (⌘⇧G / Ctrl+Shift+G).
 export const graphKey = key(isMac ? '⇧G' : 'Shift+G')
+
+/// The comments panel's shortcut label (⌘⇧M / Ctrl+Shift+M).
+export const commentsKey = key(isMac ? '⇧M' : 'Shift+M')

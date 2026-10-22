@@ -23,6 +23,10 @@ type State = {
   pageId: string | null
   /// The graph view shows in place of the page.
   graphOpen: boolean
+  /// The comments panel shows beside the page.
+  commentsOpen: boolean
+  /// The comment the panel should scroll to (from the inbox).
+  focusCommentId: string | null
   sidebarOpen: boolean
   dialog: DialogName
   toasts: Toast[]
@@ -34,6 +38,9 @@ type State = {
   selectWorkspace: (id: string) => void
   openPage: (id: string | null) => void
   showGraph: (open: boolean) => void
+  showComments: (open: boolean) => void
+  /// Opens the comments panel on a comment (from the inbox).
+  focusComment: (id: string) => void
   setDialog: (d: DialogName) => void
   toggleSidebar: () => void
   setStatus: (workspaceId: string, status: WorkspaceInfo['status']) => void
@@ -58,6 +65,8 @@ export const useApp = create<State>((set, get) => ({
   workspaceId: null,
   pageId: null,
   graphOpen: false,
+  commentsOpen: false,
+  focusCommentId: null,
   sidebarOpen: true,
   dialog: null,
   toasts: [],
@@ -80,12 +89,15 @@ export const useApp = create<State>((set, get) => ({
   },
 
   openPage: (id) => {
-    set({ pageId: id, graphOpen: false })
+    set({ pageId: id, graphOpen: false, commentsOpen: false, focusCommentId: null })
     const ws = get().workspaceId
     if (ws && id) remember(`lastPage:${ws}`, id)
   },
 
   showGraph: (graphOpen) => set({ graphOpen }),
+  showComments: (commentsOpen) =>
+    set((s) => ({ commentsOpen, focusCommentId: commentsOpen ? s.focusCommentId : null })),
+  focusComment: (id) => set({ commentsOpen: true, focusCommentId: id }),
   setDialog: (dialog) => set({ dialog }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 

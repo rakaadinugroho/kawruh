@@ -780,6 +780,25 @@ button {
   }
 }
 
+/* --------------------------------------------------------------- comments */
+
+/* Text a comment is about, marked by the comment plugin (editor/comment.ts).
+   A resolved thread fades out so an open conversation reads first. */
+.kw-comment-mark {
+  background: color-mix(in oklch, var(--amber) 22%, transparent);
+  border-bottom: 2px solid color-mix(in oklch, var(--amber) 55%, transparent);
+  border-radius: 2px;
+}
+.kw-comment-done {
+  background: color-mix(in oklch, var(--ink-3) 12%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+@media (prefers-color-scheme: dark) {
+  .kw-comment-mark {
+    background: color-mix(in oklch, var(--amber) 20%, transparent);
+  }
+}
+
 /* ----------------------------------------------------------------- graph */
 
 /* Pages as dots and links as lines (GraphView; d3 draws the SVG). Font size

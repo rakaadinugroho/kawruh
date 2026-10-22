@@ -1,5 +1,6 @@
 import { listen } from '@tauri-apps/api/event'
 import { Suspense, lazy, useEffect } from 'react'
+import { InboxDialog } from './components/InboxDialog'
 import { Onboarding } from './components/Onboarding'
 import { PageView } from './components/PageView'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -13,6 +14,7 @@ import { JoinDialog, NewWorkspaceDialog } from './components/WorkspaceDialogs'
 import { useDoc, useWorkspaceView } from './lib/hooks'
 import { type SyncState, api } from './lib/ipc'
 import { parseAppearance } from './lib/appearance'
+import { INBOX_EVERY_MS, useInbox } from './lib/inbox'
 import { CHECK_EVERY_MS } from './lib/updater'
 import { currentWorkspace, useApp } from './lib/store'
 import { createPage } from './lib/workspace'
@@ -33,11 +35,14 @@ export default function App() {
     selectWorkspace,
     openPage,
     showGraph,
+    showComments,
     toggleSidebar,
     setStatus,
     toast,
     fail,
   } = useApp()
+  const inboxOpen = useInbox((s) => s.open)
+  const showInbox = useInbox((s) => s.show)
   const ws = useApp(currentWorkspace)
   const wsHandle = useDoc(workspaceId, workspaceId)
   const view = useWorkspaceView(wsHandle)
@@ -107,6 +112,20 @@ export default function App() {
     }
   }, [])
 
+  // The inbox: on launch, then every minute for each signed-in account.
+  useEffect(() => {
+    if (!loaded) return
+    const accounts = useApp.getState().accounts.filter((a) => a.loggedIn)
+    if (accounts.length === 0) return
+    accounts.forEach((a) => void useInbox.getState().refresh(a.id))
+    const every = setInterval(() => {
+      for (const a of useApp.getState().accounts.filter((x) => x.loggedIn)) {
+        void useInbox.getState().refresh(a.id)
+      }
+    }, INBOX_EVERY_MS)
+    return () => clearInterval(every)
+  }, [loaded])
+
   // Reopen the page last viewed in this workspace.
   useEffect(() => {
     if (!workspaceId) return
@@ -160,6 +179,9 @@ export default function App() {
       } else if (key === 'g' && e.shiftKey) {
         e.preventDefault()
         showGraph(!useApp.getState().graphOpen)
+      } else if (key === 'm' && e.shiftKey) {
+        e.preventDefault()
+        showComments(!useApp.getState().commentsOpen)
       } else if (key === '\\') {
         e.preventDefault()
         toggleSidebar()
@@ -170,7 +192,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [wsHandle, readonly, setDialog, openPage, showGraph, toggleSidebar])
+  }, [wsHandle, readonly, setDialog, openPage, showGraph, showComments, toggleSidebar])
 
   if (!loaded) return <div data-tauri-drag-region className="h-full bg-paper" />
 
@@ -225,6 +247,16 @@ export default function App() {
         workspaceId={workspaceId}
         wsHandle={wsHandle}
         live={view.live}
+      />
+      <InboxDialog
+        open={inboxOpen}
+        onClose={() => showInbox(false)}
+        accountId={ws?.accountId ?? null}
+        onOpen={(n) => {
+          openPage(n.pageId)
+          // The page may still be loading; the panel waits for it and scrolls here.
+          useApp.getState().focusComment(n.commentId)
+        }}
       />
       <Toasts />
     </>
