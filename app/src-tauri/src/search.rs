@@ -85,7 +85,14 @@ impl SearchIndex {
         };
         for page in stale {
             let doc = hub.get_or_load(&page.id, workspace_id)?;
-            let markdown = markdown::doc_to_markdown(&doc);
+            let mut markdown = markdown::doc_to_markdown(&doc);
+            // A database is searched as its table, so its rows are found too.
+            if let Some(table) = kawruh_core::database::to_markdown(&doc) {
+                if !markdown.trim().is_empty() {
+                    markdown.push_str("\n\n");
+                }
+                markdown.push_str(&table);
+            }
             let plain = plain_text(&markdown);
             let entry = Cached {
                 lower: plain.to_lowercase(),
@@ -326,6 +333,7 @@ mod tests {
             icon: String::new(),
             created: 0,
             deleted: 0,
+            kind: String::new(),
         }
     }
 

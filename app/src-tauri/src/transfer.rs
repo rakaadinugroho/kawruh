@@ -728,6 +728,7 @@ mod tests {
             icon: String::new(),
             created: 0,
             deleted: 0,
+            kind: String::new(),
         };
         let image = format!("{}.png", "a".repeat(64));
         let pages = vec![

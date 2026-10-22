@@ -74,7 +74,19 @@ pub(crate) fn snapshot_if_due(
     let Ok(doc) = hub.get_or_load(page_id, workspace_id) else {
         return;
     };
-    let markdown = kawruh_core::markdown::doc_to_markdown(&doc);
+    // A database page is snapshotted with its database, so the history shows
+    // the table and can bring it back.
+    let is_database = hub
+        .get_or_load(workspace_id, workspace_id)
+        .ok()
+        .and_then(|ws| {
+            workspace::all_pages(&ws)
+                .into_iter()
+                .find(|p| p.id == page_id)
+        })
+        .map(|p| p.kind == kawruh_core::database::KIND_DATABASE)
+        .unwrap_or(false);
+    let markdown = kawruh_core::database::page_markdown(&doc, is_database);
     if let Err(e) = history.snapshot(&hub.db.lock().unwrap(), page_id, &markdown, now) {
         tracing::warn!("page history for {page_id}: {e}");
     }

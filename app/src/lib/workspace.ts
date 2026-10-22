@@ -1,6 +1,7 @@
 /// Page tree operations on the workspace Y.Doc.
 /// Mirrors crates/kawruh-core/src/workspace.rs (same layout, same rules):
-/// `meta: Map{ name }`, `pages: Map<id, Map{ title, parent, order, icon, created, deleted }>`.
+/// `meta: Map{ name }`,
+/// `pages: Map<id, Map{ title, parent, order, icon, created, deleted, kind }>`.
 import * as Y from 'yjs'
 
 export type Page = {
@@ -11,6 +12,8 @@ export type Page = {
   icon: string
   created: number
   deleted: number
+  /// 'database' for a database page; '' for an ordinary page.
+  kind: string
 }
 
 export const pagesMap = (doc: Y.Doc) => doc.getMap<Y.Map<unknown>>('pages')
@@ -30,6 +33,7 @@ export function readPages(doc: Y.Doc): Page[] {
       icon: String(m.get('icon') ?? ''),
       created: Number(m.get('created') ?? 0),
       deleted: Number(m.get('deleted') ?? 0),
+      kind: String(m.get('kind') ?? ''),
     })
   })
   return breakCycles(out.sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1)))
@@ -126,6 +130,7 @@ export function createPage(doc: Y.Doc, opts: { title?: string; parent?: string }
     m.set('icon', '')
     m.set('created', Date.now())
     m.set('deleted', 0)
+    m.set('kind', '')
     pagesMap(doc).set(id, m)
   })
   return id
@@ -141,6 +146,8 @@ export const renamePage = (doc: Y.Doc, id: string, title: string) =>
 export const setPageIcon = (doc: Y.Doc, id: string, icon: string) => setField(doc, id, 'icon', icon)
 export const deletePage = (doc: Y.Doc, id: string) => setField(doc, id, 'deleted', Date.now())
 export const restorePage = (doc: Y.Doc, id: string) => setField(doc, id, 'deleted', 0)
+/// Marks a page as a database ('database') or back to an ordinary page ('').
+export const setPageKind = (doc: Y.Doc, id: string, kind: string) => setField(doc, id, 'kind', kind)
 /// Deletes a page and its whole subtree for good (sub-pages would otherwise
 /// lose their parent and resurface at the root).
 export function purgePage(doc: Y.Doc, id: string) {

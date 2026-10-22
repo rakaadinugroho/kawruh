@@ -13,6 +13,7 @@ import {
   Share2,
   SmilePlus,
   SquarePen,
+  Table2,
   Trash2,
   Upload,
 } from 'lucide-react'
@@ -20,12 +21,14 @@ import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { Editor } from '../editor/Editor'
 import { CommentPanel } from './CommentPanel'
+import { DatabaseView } from './DatabaseView'
 import { HistoryDialog } from './HistoryDialog'
 import type { DocHandle } from '../lib/docs'
 import { type WorkspaceView, colorFor, useDoc, usePeers } from '../lib/hooks'
 import { type PageRef, api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
 import { commentsKey, isMac, key } from '../lib/platform'
+import { KIND_DATABASE, defaultSchema, readSchema, writeSchema } from '../lib/database'
 import {
   type Page,
   childrenOf,
@@ -35,6 +38,7 @@ import {
   renamePage,
   restorePage,
   setPageIcon,
+  setPageKind,
 } from '../lib/workspace'
 import { Button, IconButton, Menu, copyText, useMenuAnchor } from './ui'
 
@@ -153,6 +157,7 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
   const iconMenu = useMenuAnchor()
   const readonly = ws?.role === 'viewer'
   const account = accounts.find((a) => a.id === ws?.accountId)
+  const isDatabase = page?.kind === KIND_DATABASE
   const trail = useMemo(() => (page ? pagePath(view.all, page.id) : []), [view.all, page])
   const children = useMemo(() => (page ? childrenOf(view.live, page.id) : []), [view.live, page])
   const inTrash = page ? !view.live.some((p) => p.id === page.id) : false
@@ -251,6 +256,21 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
     }
   }
 
+  /// Turns the page into a database (or back into an ordinary page). The body
+  /// is left alone, so turning back shows it again.
+  const toggleDatabase = () => {
+    if (!wsHandle || !page) return
+    if (isDatabase) {
+      setPageKind(wsHandle.doc, page.id, '')
+      return
+    }
+    setPageKind(wsHandle.doc, page.id, KIND_DATABASE)
+    // A page that becomes a database needs columns to start with.
+    if (handle && readSchema(handle.doc).length === 0) {
+      writeSchema(handle.doc, defaultSchema())
+    }
+  }
+
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-paper" data-testid="page-view">
       <header
@@ -316,6 +336,12 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
               icon: <Upload size={14} />,
               disabled: readonly,
               onSelect: importMd,
+            },
+            {
+              label: isDatabase ? 'Turn back into a page' : 'Turn into a database',
+              icon: <Table2 size={14} />,
+              disabled: readonly || !wsHandle,
+              onSelect: toggleDatabase,
             },
             'separator',
             {
@@ -400,14 +426,18 @@ export function PageView({ wsHandle, view }: { wsHandle: DocHandle | null; view:
             />
             <div className="mt-4">
               {handle && handle.isReady() ? (
-                <Editor
-                  handle={handle}
-                  workspaceId={ws?.id ?? ''}
-                  readonly={readonly}
-                  pages={view.live}
-                  onOpenCanvas={setCanvasId}
-                  onOpenPage={(id) => openPage(id)}
-                />
+                isDatabase ? (
+                  <DatabaseView doc={handle.doc} readonly={readonly} />
+                ) : (
+                  <Editor
+                    handle={handle}
+                    workspaceId={ws?.id ?? ''}
+                    readonly={readonly}
+                    pages={view.live}
+                    onOpenCanvas={setCanvasId}
+                    onOpenPage={(id) => openPage(id)}
+                  />
+                )
               ) : (
                 <div className="h-40" />
               )}

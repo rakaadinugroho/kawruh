@@ -1,7 +1,8 @@
-import { ChevronRight, FilePlus2, FileText, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, FilePlus2, FileText, MoreHorizontal, Pencil, Plus, Table2, Trash2 } from 'lucide-react'
 import { type DragEvent, useEffect, useRef, useState } from 'react'
 import type * as Y from 'yjs'
 import { useApp } from '../lib/store'
+import { KIND_DATABASE } from '../lib/database'
 import {
   type Page,
   childrenOf,
@@ -181,7 +182,11 @@ export function PageTree({ workspaceId, doc, all, live, currentPageId, readonly,
               />
             </button>
             <span className="flex w-5 shrink-0 justify-center text-[14px] leading-none">
-              {page.icon || <FileText size={14} className="text-ink-3" />}
+              {page.icon || (page.kind === KIND_DATABASE ? (
+                <Table2 size={14} className="text-ink-3" />
+              ) : (
+                <FileText size={14} className="text-ink-3" />
+              ))}
             </span>
             {renaming === page.id ? (
               <input

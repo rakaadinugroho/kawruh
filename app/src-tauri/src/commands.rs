@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
-use kawruh_core::{markdown, workspace};
+use kawruh_core::{database, markdown, workspace};
 use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Channel;
@@ -541,18 +541,40 @@ pub fn page_export_markdown(
     page_id: String,
 ) -> Result<String> {
     let ws = state.hub.get_or_load(&workspace_id, &workspace_id)?;
-    let title = workspace::all_pages(&ws)
+    let page = workspace::all_pages(&ws)
         .into_iter()
-        .find(|p| p.id == page_id)
-        .map(|p| p.title)
-        .unwrap_or_default();
+        .find(|p| p.id == page_id);
+    let title = page.as_ref().map(|p| p.title.clone()).unwrap_or_default();
     let doc = state.hub.get_or_load(&page_id, &workspace_id)?;
-    let body = markdown::doc_to_markdown(&doc);
+    let body = page_markdown(&doc, page.as_ref());
     Ok(if title.is_empty() {
         body
     } else {
         format!("# {title}\n\n{body}")
     })
+}
+
+/// A page's markdown: its body, plus the database it carries (as the
+/// `kawruh-database` block that keeps it a database after an import).
+fn page_markdown(doc: &kawruh_core::yrs::Doc, page: Option<&workspace::PageMeta>) -> String {
+    database::page_markdown(
+        doc,
+        page.map(|p| p.kind == database::KIND_DATABASE)
+            .unwrap_or(false),
+    )
+}
+
+/// A page's markdown for printing: a database shows as a table.
+fn print_markdown(doc: &kawruh_core::yrs::Doc, page: &workspace::PageMeta) -> String {
+    let body = markdown::doc_to_markdown(doc);
+    if page.kind != database::KIND_DATABASE {
+        return body;
+    }
+    match database::to_markdown(doc) {
+        Some(table) if body.trim().is_empty() => table,
+        Some(table) => format!("{body}\n\n{table}"),
+        None => body,
+    }
 }
 
 /// Creates a page from markdown. A leading `# Title` becomes the page title.
@@ -578,7 +600,18 @@ fn import_markdown(
     let ws = state.hub.get_or_load(workspace_id, workspace_id)?;
     let page = workspace::create_page(&ws, &title, parent, ORIGIN_LOCAL)?;
     let doc = state.hub.get_or_load(&page, workspace_id)?;
-    markdown::set_markdown(&doc, body, ORIGIN_LOCAL);
+    match database::split_block(body) {
+        // A page that carries a database becomes one; the block itself is
+        // taken out of the body.
+        Some((rest, db)) => {
+            workspace::set_page_kind(&ws, &page, database::KIND_DATABASE, ORIGIN_LOCAL)?;
+            database::write_database(&doc, &db, ORIGIN_LOCAL);
+            if !rest.trim().is_empty() {
+                markdown::set_markdown(&doc, &rest, ORIGIN_LOCAL);
+            }
+        }
+        None => markdown::set_markdown(&doc, body, ORIGIN_LOCAL),
+    }
     state.sync.subscribe_all(workspace_id);
     Ok(page)
 }
@@ -850,7 +883,8 @@ pub async fn workspace_export(
     let mut pages = Vec::new();
     for page in workspace::live_pages(&ws) {
         let doc = state.hub.get_or_load(&page.id, &workspace_id)?;
-        pages.push((page, markdown::doc_to_markdown(&doc)));
+        let body = page_markdown(&doc, Some(&page));
+        pages.push((page, body));
     }
     let name = file_name(&workspace::workspace_name(&ws));
     let root = dest.join(transfer::dedupe(&name, |n| dest.join(n).exists()));
@@ -913,7 +947,8 @@ pub fn page_print_data(
                 title: page.title.clone(),
                 icon: page.icon.clone(),
                 depth,
-                markdown: markdown::doc_to_markdown(&doc),
+                // A database prints as a table, not as its JSON block.
+                markdown: print_markdown(&doc, page),
                 canvases: string_map(&doc, "canvas_svg"),
                 links: string_map(&doc, "link_meta"),
             })
@@ -1039,12 +1074,34 @@ pub fn page_history_restore(
 ) -> Result<()> {
     let markdown_text = crate::history::get(&state.db(), &page_id, id)?
         .ok_or_else(|| Error::msg("that version is gone"))?;
+    let ws = state.hub.get_or_load(&workspace_id, &workspace_id)?;
+    let is_database = workspace::all_pages(&ws)
+        .into_iter()
+        .find(|p| p.id == page_id)
+        .map(|p| p.kind == database::KIND_DATABASE)
+        .unwrap_or(false);
     let doc = state.hub.get_or_load(&page_id, &workspace_id)?;
-    let current = markdown::doc_to_markdown(&doc);
+    // What's there now is saved first, with its database, so the restore can
+    // itself be undone.
+    let current = database::page_markdown(&doc, is_database);
     state
         .history
         .snapshot(&state.db(), &page_id, &current, workspace::now_ms())?;
-    markdown::set_markdown(&doc, &markdown_text, ORIGIN_LOCAL);
+    // A version that carries a database restores the database, not a code
+    // block in the body.
+    match database::split_block(&markdown_text) {
+        Some((rest, db)) => {
+            workspace::set_page_kind(&ws, &page_id, database::KIND_DATABASE, ORIGIN_LOCAL)?;
+            database::write_database(&doc, &db, ORIGIN_LOCAL);
+            markdown::set_markdown(&doc, &rest, ORIGIN_LOCAL);
+        }
+        None => {
+            if is_database {
+                workspace::set_page_kind(&ws, &page_id, "", ORIGIN_LOCAL)?;
+            }
+            markdown::set_markdown(&doc, &markdown_text, ORIGIN_LOCAL)
+        }
+    }
     Ok(())
 }
 
@@ -1106,6 +1163,7 @@ mod tests {
             icon: String::new(),
             created: 0,
             deleted: 0,
+            kind: String::new(),
         }
     }
 
