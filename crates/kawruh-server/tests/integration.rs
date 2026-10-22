@@ -660,6 +660,7 @@ async fn mcp_tools_edit_live_documents() {
             "list_pages",
             "list_workspaces",
             "move_page",
+            "query_database",
             "read_page",
             "rename_page",
             "search_pages",
@@ -882,6 +883,111 @@ async fn mcp_comments_notify_the_people_they_mention() {
     assert!(!err, "{text}");
     assert!(text.contains("reads fine to me"), "{text}");
     assert!(text.contains("does this read right?"), "{text}");
+}
+
+#[tokio::test]
+async fn mcp_reads_and_queries_databases() {
+    let s = start().await;
+    let (alice, _) = register(&s, "alice").await;
+    let ws = create_workspace(&s, &alice, "Tables").await;
+    let (_, pat) = post(&s, &alice, "/api/tokens", json!({"name": "agent"})).await;
+    let mut mcp = Mcp::connect(&s, pat["token"].as_str().unwrap()).await;
+
+    // A page whose body carries a database block becomes a database.
+    let db = json!({
+        "columns": [
+            {"id": "name", "name": "Name", "type": "title"},
+            {"id": "status", "name": "Status", "type": "select", "options": ["Todo", "Doing"]}
+        ],
+        "rows": [
+            {"id": "r1", "cells": {"name": "Write the docs", "status": "Doing"}},
+            {"id": "r2", "cells": {"name": "Ship it", "status": "Todo"}}
+        ]
+    });
+    let body = format!("```kawruh-database\n{db}\n```\n");
+    let (text, err) = mcp
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Tasks", "markdown": body}),
+        )
+        .await;
+    assert!(!err, "{text}");
+    let page = extract_id(&text);
+
+    // The page is a database in the tree.
+    let watcher = Client::connect(&s, &alice, &ws);
+    wait_until("watcher online", || watcher.online()).await;
+    watcher.handle.subscribe(&ws);
+    wait_until("watcher sees the database page", || {
+        kawruh_core::workspace::live_pages(&watcher.doc(&ws))
+            .iter()
+            .any(|p| p.id == page && p.kind == "database")
+    })
+    .await;
+
+    // Reading the page shows the table, not the JSON block.
+    let (read, err) = mcp.call("read_page", json!({"page_id": page})).await;
+    assert!(!err, "{read}");
+    assert!(read.contains("| Name | Status |"), "{read}");
+    assert!(read.contains("Write the docs"), "{read}");
+    assert!(!read.contains("kawruh-database"), "{read}");
+
+    // The rows can be queried, and filtered by a column.
+    let (rows, err) = mcp.call("query_database", json!({"page_id": page})).await;
+    assert!(!err, "{rows}");
+    assert!(
+        rows.contains("Write the docs") && rows.contains("Ship it"),
+        "{rows}"
+    );
+    let (doing, err) = mcp
+        .call(
+            "query_database",
+            json!({"page_id": page, "column": "Status", "value": "Doing"}),
+        )
+        .await;
+    assert!(!err, "{doing}");
+    assert!(doing.contains("Write the docs"), "{doing}");
+    assert!(!doing.contains("Ship it"), "{doing}");
+
+    // An unknown column is an error, not an empty table.
+    let (bad, err) = mcp
+        .call(
+            "query_database",
+            json!({"page_id": page, "column": "Nope", "value": "x"}),
+        )
+        .await;
+    assert!(err && bad.contains("no column named"), "{bad}");
+
+    // A page that is not a database says so.
+    let (text, _) = mcp
+        .call(
+            "create_page",
+            json!({"workspace_id": ws, "title": "Plain", "markdown": "just words"}),
+        )
+        .await;
+    let plain = extract_id(&text);
+    let (bad, err) = mcp.call("query_database", json!({"page_id": plain})).await;
+    assert!(err && bad.contains("not a database"), "{bad}");
+
+    // A shared database shows its table too.
+    let (status, share) = post(
+        &s,
+        &alice,
+        &format!("/api/workspaces/{ws}/shares"),
+        json!({"page_id": page}),
+    )
+    .await;
+    assert_eq!(status, 200, "{share}");
+    let html = http()
+        .get(format!("{}/s/{}", s.base, share["token"].as_str().unwrap()))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains("Write the docs"), "{html}");
+    assert!(!html.contains("kawruh-database"), "{html}");
 }
 
 #[tokio::test]

@@ -16,6 +16,7 @@ use rmcp::{ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::Deserialize;
 
 use kawruh_core::comments;
+use kawruh_core::database;
 use kawruh_core::markdown;
 use kawruh_core::workspace;
 
@@ -147,6 +148,17 @@ pub struct MoveArgs {
     parent_id: Option<String>,
     /// Position among the new siblings (0 = first); omitted = last.
     index: Option<u32>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct QueryDatabaseArgs {
+    page_id: String,
+    /// Only rows whose column holds this value. Name the column as it appears
+    /// in the database (its name, not its id).
+    column: Option<String>,
+    value: Option<String>,
+    /// How many rows to return at most (50 by default).
+    limit: Option<u32>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -343,6 +355,16 @@ impl KawruhMcp {
             .get_or_load(&args.page_id, &ws, false)
             .map_err(|e| e.to_string())?;
         let body = markdown::doc_to_markdown(&live.doc);
+        // A database reads as a table, not as its JSON block.
+        let body = if meta.kind == database::KIND_DATABASE {
+            match database::to_markdown(&live.doc) {
+                Some(table) if body.trim().is_empty() => table,
+                Some(table) => format!("{body}\n\n{table}"),
+                None => body,
+            }
+        } else {
+            body
+        };
         let path = workspace::path(&all, &args.page_id)
             .iter()
             .map(|t| title_or_untitled(t).to_string())
@@ -424,17 +446,31 @@ impl KawruhMcp {
             .get_or_load(&id, &args.workspace_id, true)
             .map_err(|e| e.to_string())?;
         let md = args.markdown.unwrap_or_default();
+        let mut is_database = false;
         if !md.trim().is_empty() {
-            markdown::set_markdown(&live.doc, &md, ORIGIN_MCP);
+            // A page that carries a `kawruh-database` block becomes a database.
+            match database::split_block(&md) {
+                Some((rest, db)) => {
+                    workspace::set_page_kind(&ws.doc, &id, database::KIND_DATABASE, ORIGIN_MCP)
+                        .map_err(|e| e.to_string())?;
+                    database::write_database(&live.doc, &db, ORIGIN_MCP);
+                    if !rest.trim().is_empty() {
+                        markdown::set_markdown(&live.doc, &rest, ORIGIN_MCP);
+                    }
+                    is_database = true;
+                }
+                None => markdown::set_markdown(&live.doc, &md, ORIGIN_MCP),
+            }
         }
         {
             let conn = self.state.db.lock();
+            let text = database::page_markdown(&live.doc, is_database);
             db::upsert_page_text(
                 &conn,
                 &id,
                 &args.workspace_id,
                 Some(args.title.trim()),
-                Some(&md),
+                Some(&text),
                 Some(false),
             )
             .map_err(|e| e.to_string())?;
@@ -463,9 +499,35 @@ impl KawruhMcp {
             .get_or_load(&args.page_id, &ws, true)
             .map_err(|e| e.to_string())?;
         let mode = args.mode.unwrap_or_default();
-        match mode {
-            UpdateMode::Replace => markdown::set_markdown(&live.doc, &args.markdown, ORIGIN_MCP),
-            UpdateMode::Append => markdown::append_markdown(&live.doc, &args.markdown, ORIGIN_MCP),
+        // A body that carries a `kawruh-database` block writes a database.
+        match database::split_block(&args.markdown) {
+            Some((rest, db)) => {
+                let doc = self.workspace_doc(&ws)?;
+                workspace::set_page_kind(
+                    &doc.doc,
+                    &args.page_id,
+                    database::KIND_DATABASE,
+                    ORIGIN_MCP,
+                )
+                .map_err(|e| e.to_string())?;
+                database::write_database(&live.doc, &db, ORIGIN_MCP);
+                match mode {
+                    UpdateMode::Replace => {
+                        if !rest.trim().is_empty() {
+                            markdown::set_markdown(&live.doc, &rest, ORIGIN_MCP);
+                        }
+                    }
+                    UpdateMode::Append => markdown::append_markdown(&live.doc, &rest, ORIGIN_MCP),
+                }
+            }
+            None => match mode {
+                UpdateMode::Replace => {
+                    markdown::set_markdown(&live.doc, &args.markdown, ORIGIN_MCP)
+                }
+                UpdateMode::Append => {
+                    markdown::append_markdown(&live.doc, &args.markdown, ORIGIN_MCP)
+                }
+            },
         }
         Ok(format!(
             "{} page {}.",
@@ -735,6 +797,57 @@ impl KawruhMcp {
         Ok(format!(
             "Commented on page {}.\nComment ID: {id}",
             args.page_id
+        ))
+    }
+
+    #[tool(
+        description = "Read the rows of a database page as a markdown table. With column and value, only the rows whose column holds that value are returned."
+    )]
+    async fn query_database(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<QueryDatabaseArgs>,
+    ) -> ToolResult {
+        let user = caller(&parts)?;
+        let (ws, _) = self.locate(&args.page_id, &user)?;
+        let live = self
+            .state
+            .docs
+            .get_or_load(&args.page_id, &ws, false)
+            .map_err(|e| e.to_string())?;
+        let Some(mut db) = database::database(&live.doc) else {
+            return Err(format!("page {} is not a database", args.page_id));
+        };
+        let total = db.rows.len();
+        if let Some(column) = args.column.as_deref().filter(|c| !c.is_empty()) {
+            let col = db
+                .columns
+                .iter()
+                .find(|c| c.id == column || c.name.eq_ignore_ascii_case(column))
+                .cloned()
+                .ok_or_else(|| {
+                    format!(
+                        "no column named \"{column}\"; the database has: {}",
+                        db.columns
+                            .iter()
+                            .map(|c| c.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })?;
+            let wanted = args.value.clone().unwrap_or_default();
+            db.rows.retain(|row| {
+                let value = row.cells.get(&col.id).cloned().unwrap_or_default();
+                database::json_to_text(&value) == wanted
+            });
+        }
+        let limit = args.limit.unwrap_or(50) as usize;
+        db.rows.truncate(limit);
+        let table = database::markdown_of(&db);
+        Ok(format!(
+            "Database on page {} ({} of {total} rows):\n\n{table}",
+            args.page_id,
+            db.rows.len()
         ))
     }
 }

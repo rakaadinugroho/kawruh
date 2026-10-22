@@ -399,7 +399,14 @@ pub fn reindex(reg: &DocRegistry, doc_id: &str, workspace_id: &str) -> Result<()
         }
     } else {
         let live = reg.get_or_load(doc_id, workspace_id, false)?;
-        let markdown = kawruh_core::markdown::doc_to_markdown(&live.doc);
+        let mut markdown = kawruh_core::markdown::doc_to_markdown(&live.doc);
+        // A database is searched as its table, so its rows are found too.
+        if let Some(table) = kawruh_core::database::to_markdown(&live.doc) {
+            if !markdown.trim().is_empty() {
+                markdown.push_str("\n\n");
+            }
+            markdown.push_str(&table);
+        }
         let meta = pages.iter().find(|p| p.id == doc_id);
         let conn = reg.db.lock();
         db::upsert_page_text(

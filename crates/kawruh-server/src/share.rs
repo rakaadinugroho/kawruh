@@ -182,6 +182,16 @@ async fn render(state: AppState, token: String, sub_page: Option<String>) -> Res
         return not_found();
     };
     let markdown = kawruh_core::markdown::doc_to_markdown(&live.doc);
+    // A database reads as a table, not as its JSON block.
+    let markdown = if page.kind == kawruh_core::database::KIND_DATABASE {
+        match kawruh_core::database::to_markdown(&live.doc) {
+            Some(table) if markdown.trim().is_empty() => table,
+            Some(table) => format!("{markdown}\n\n{table}"),
+            None => markdown,
+        }
+    } else {
+        markdown
+    };
     let body_html = embed_canvases(
         &kawruh_core::markdown::markdown_to_html(&markdown),
         &string_map(&live.doc, CANVAS_SVG),
@@ -877,6 +887,7 @@ mod tests {
             icon: String::new(),
             created: 0,
             deleted: 0,
+            kind: String::new(),
         };
         let pages = [page("a", ""), page("b", "a"), page("c", "b"), page("d", "")];
         let mut ids: Vec<String> = subtree(&pages, "a").into_iter().collect();
