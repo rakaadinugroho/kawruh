@@ -139,6 +139,62 @@ uploads them: a new asset that would take the workspace owner's total past it is
 `413 quota_exceeded`. Re-uploading an asset that is already stored is never refused. Responses carry `X-Content-Type-Options: nosniff` and
 `Cache-Control: private, max-age=31536000, immutable` (`public, …` on the share route).
 
+## Comments and notifications
+
+Comments live in the page document, not in the markdown: the page doc's root
+`Y.Map` named `comments` maps a comment id to a JSON string
+`{id, thread, reply_to, quote, anchor, anchor_end, body, author, author_name,
+created, resolved}`. A reply carries the root comment's id in `thread` and the
+comment it answers in `reply_to`, so two people writing in the same thread never
+overwrite each other. `quote` is the text a comment is about and `anchor` /
+`anchor_end` are its two ends as encoded Yjs relative positions (only the app
+resolves them). A mention is an ordinary link: `@[Name](kawruh://user/<user_id>)`.
+
+A comment notifies the people it mentions and, when it is a reply, the others
+already in its thread — never the author about their own comment, and only
+members of the workspace.
+
+| Method | Path | Body | Who | Response |
+|---|---|---|---|---|
+| GET | `/api/notifications` | — | signed in | `{items: Notification[], unread: number}`, newest first (100 max) |
+| POST | `/api/notifications/read` | `{"ids": [...]}` (empty = all) | signed in | `{marked, unread}` |
+
+`Notification` is `{id, workspace_id, page_id, comment_id, kind, body, author,
+author_name, created_at, read_at}` with `kind` `"mention"` or `"reply"`. The id
+is `<comment_id>:<user_id>`, so the same comment never notifies the same person
+twice; a comment that is resolved or deleted takes its notifications with it.
+
+## Databases
+
+A page can be a **database**: a table of rows with typed properties. It is not
+another kind of document — the same page doc holds the body, and three root
+`Y.Map`s hold the table:
+
+- `schema`: `{value: <json>}` — a JSON list of properties
+  `{id, name, type, options?}`, where `type` is one of `title` · `text` ·
+  `number` · `select` · `multi_select` · `date` · `checkbox` · `person` · `url`
+  and `options` lists the choices of a `select` / `multi_select` column,
+- `view`: `{value: "table" | "board"}` — the view the page opens in,
+- `rows`: row id → a map of property id → value. The row's position among the
+  others is kept under the key `__order` (a number).
+
+Rows are not pages: they never appear in the page tree, and every cell is its
+own key, so two people editing different cells of the same row never overwrite
+each other. The page's entry in the workspace document carries
+`kind: "database"`; an ordinary page carries an empty kind.
+
+In markdown a database is a `kawruh-database` fence holding its JSON, so it
+survives an export and an import:
+
+````markdown
+```kawruh-database
+{"columns":[{"id":"name","name":"Name","type":"title"},{"id":"status","name":"Status","type":"select","options":["Todo","Doing"]}],"rows":[{"id":"r1","cells":{"name":"Write the docs","status":"Doing"}}]}
+```
+````
+
+`read_page`, the search index and share pages show a database as a markdown
+table; the `kawruh-database` block is only what an export writes.
+
 ## Health
 
 `GET /api/health` → `{ok: true, version, disk_free_bytes}`.
@@ -178,6 +234,9 @@ edits are applied to the live documents and reach open editors immediately):
 | `upload_image` | `workspace_id`, `data_base64`, `mime` (png · jpeg · gif · webp · avif), `alt?`, `page_id?` — stores an asset (same limits and quota as `PUT`), returns `![alt](kawruh-asset://<workspace_id>/<name>)`; with `page_id` also appends it to that page |
 | `list_backlinks` | `page_id` — pages in the same workspace whose body links to it (`kawruh://page/<page_id>`) |
 | `share_page` | `page_id` — creates (or returns) the page's public share link and returns its `url` (editor+) |
+| `list_comments` | `page_id` — the page's comments as threads, each with its author |
+| `add_comment` | `page_id`, `body`, `reply_to?` — writes a comment or a reply; mention with `@[Name](kawruh://user/<user_id>)` (editor+) |
+| `query_database` | `page_id`, `column?`, `value?`, `limit?` — the rows of a database page as a markdown table; with `column` (a column name or id) only the rows whose cell holds `value` are returned (default limit 50) |
 
 ## Server configuration (env)
 

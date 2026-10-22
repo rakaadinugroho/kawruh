@@ -164,6 +164,9 @@ Pages an agent deletes go to the Trash, and you can restore them in the app.
 | `upload_image` | `workspace_id`, `data_base64`, `mime` (png \| jpeg \| gif \| webp \| avif), `alt?`, `page_id?` | Store an image; returns its markdown `![alt](kawruh-asset://…)`, and appends it to `page_id` if given |
 | `list_backlinks` | `page_id` | Pages in the same workspace that link to this page, as `- Title (page_id)` |
 | `share_page` | `page_id` | Create (or return) the page's public read-only link; returns the URL |
+| `list_comments` | `page_id` | The page's comments as threads, each with its author and the text it is about |
+| `add_comment` | `page_id`, `body`, `reply_to?` | Write a comment, or a reply in an existing thread (editor+) |
+| `query_database` | `page_id`, `column?`, `value?`, `limit?` | The rows of a database page as a markdown table; with `column` only the rows whose cell holds `value` are returned |
 
 Write tools need the **editor** or **owner** role; viewers get a read-only error.
 
@@ -186,7 +189,47 @@ Page bodies are GitHub-flavoured markdown. Titles are not part of the body; use
   `![](kawruh-asset://<workspace>/<sha256>.png)`. Keep those refs when rewriting
   a page. Agents add new images with `upload_image`, which returns that markdown;
   ordinary `https://` image URLs work too.
+- **Comments:** `add_comment` writes into the page document, so it appears
+  live in open editors. Mention someone with `@[Name](kawruh://user/<user_id>)`
+  (the id is their user id) and they get a notification; so does everyone else in
+  a thread you reply to. `list_comments` shows what is already there, including
+  the replies. Comments are not part of the markdown — `read_page` won't show
+  them.
 - **Search** reads an index refreshed about two seconds after each edit.
+
+## Databases
+
+A page can be a **database**: a table of rows with typed properties (name,
+text, number, status, date, checkbox, person, link). The app opens it as a
+table or as a board. Rows are not pages, so they never show up in the page
+tree.
+
+An agent makes a page a database by writing a `kawruh-database` block into its
+body, with `create_page` or `update_page`:
+
+````markdown
+```kawruh-database
+{"columns":[{"id":"name","name":"Name","type":"title"},{"id":"status","name":"Status","type":"select","options":["Todo","Doing"]}],"rows":[{"id":"r1","cells":{"name":"Write the docs","status":"Doing"}}]}
+```
+````
+
+The columns are `{id, name, type, options?}` — `type` is one of `title`,
+`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `person`,
+`url`, and `options` lists the choices of a `select` column. The rows are
+`{id, cells}` and every cell is written under the id of its column.
+
+Afterwards `read_page` shows the rows as a markdown table, and
+`query_database` reads them:
+
+```json
+{"page_id": "…", "column": "Status", "value": "Doing"}
+```
+
+With `column` and `value`, only the rows whose cell holds that value come
+back; `limit` caps how many rows are returned (50 by default).
+
+Keep the block when you rewrite the page's body — without it the page is an
+ordinary page again.
 
 ## Example prompts
 
@@ -198,6 +241,11 @@ Page bodies are GitHub-flavoured markdown. Titles are not part of the body; use
 - "Turn this repository's README into a page under *Docs*."
 - "Add a Mermaid sequence diagram of the login flow to the *Auth* page."
 - "Move every page with *draft* in its title under *Archive*."
+- "Read the comments on *Roadmap* and post a summary for the team."
+- "Comment on *Pricing* asking @Ana whether the numbers include tax."
+- "Make a *Tasks* database with the columns Name, Status and Due, and add the
+  action items from this transcript as rows."
+- "Show me the rows of the *Tasks* database whose Status is *Doing*."
 
 ## Access and safety
 

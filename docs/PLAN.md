@@ -63,9 +63,10 @@ update is never echoed back to where it came from.
 ## Data model
 
 - **Workspace doc** (id = workspace id): `meta: Map{name}`, `pages: Map<pageId, Map{title,
-  parent ("" = root), order (f64), icon, created, deleted (0 = live)}>`.
+  parent ("" = root), order (f64), icon, kind ("" = page, "database"), created, deleted (0 = live)}>`.
 - **Page doc** (id = page id): `prosemirror: XmlFragment` (Milkdown schema),
-  `canvas:<id>: Map<elementId, JSON string>`, `canvas_svg: Map<canvasId, svg string>`.
+  `canvas:<id>: Map<elementId, JSON string>`, `canvas_svg: Map<canvasId, svg string>`,
+  `comments: Map<commentId, JSON string>`, and for a database page `schema`, `view` and `rows`.
 - **Markdown ↔ Yjs** conversion lives in `kawruh-core` (Rust, comrak). A **schema contract**
   (`crates/kawruh-core/schema.json`) is dumped from the real Milkdown editor; Rust tests check
   converter output against it, and a cross-language test runs Rust output through y-prosemirror.
@@ -88,6 +89,8 @@ update is never echoed back to where it came from.
 
 `list_workspaces`, `list_pages`, `read_page`, `search_pages`, `create_page`, `update_page`
 (replace|append), `rename_page`, `move_page`, `delete_page` (soft). Writes require editor role.
+Later: `upload_image`, `list_backlinks`, `share_page`, `list_comments`, `add_comment`,
+`query_database`.
 
 ## Phases (each independently usable)
 

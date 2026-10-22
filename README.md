@@ -9,6 +9,10 @@ and write pages over MCP.
 
 - **Link pages** with `[[`, and see what links back to each page.
 - **Graph view** (⌘⇧G) draws your pages as dots and the links between them as lines.
+- **Comments** on a page or on a piece of text (⌘⇧M), with `@mentions`; mentions
+  and replies land in your **inbox**.
+- **Databases**: turn a page into a table with typed columns, or a board you can
+  drag cards across.
 - **Search** titles and page text with ⌘K.
 - **Templates** (daily note, meeting notes, your own) and **page history** with restore.
 - **Import** a Notion export or an Obsidian vault; **export** a workspace, a page
