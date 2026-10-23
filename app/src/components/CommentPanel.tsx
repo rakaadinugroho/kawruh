@@ -33,9 +33,9 @@ const ago = (ms: number) => {
 }
 
 /// A comment body, with its mentions styled instead of shown as markdown.
-function Body({ text }: { text: string }) {
+export function CommentBody({ text, className = '' }: { text: string; className?: string }) {
   return (
-    <p className="whitespace-pre-wrap break-words">
+    <p className={`whitespace-pre-wrap break-words ${className}`}>
       {segments(text).map((seg, i) =>
         seg.userId ? (
           <span key={i} className="rounded-[3px] bg-accent-soft px-1 text-accent">
@@ -344,12 +344,12 @@ export function CommentPanel({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-baseline gap-1.5 text-[12px]">
                             <span className="font-semibold text-ink">
-                              {c.author_name || 'Someone'}
+                              {c.author === author?.id ? 'You' : c.author_name || 'Someone'}
                             </span>
                             <span className="text-ink-3">{ago(c.created)}</span>
                           </div>
                           <div className="text-[13px] leading-[1.5] text-ink-2">
-                            <Body text={c.body} />
+                            <CommentBody text={c.body} />
                           </div>
                         </div>
                       </li>

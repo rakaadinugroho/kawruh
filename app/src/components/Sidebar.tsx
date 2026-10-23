@@ -19,7 +19,7 @@ import type { WorkspaceView } from '../lib/hooks'
 import { type SyncState, type WorkspaceInfo, api } from '../lib/ipc'
 import { currentWorkspace, useApp } from '../lib/store'
 import { createPage } from '../lib/workspace'
-import { useInbox } from '../lib/inbox'
+import { inboxSelector, useInbox } from '../lib/inbox'
 import { graphKey, key, thisDevice } from '../lib/platform'
 import { PageTree } from './PageTree'
 import { IconButton, Kbd, Menu, type MenuItem, useMenuAnchor } from './ui'
@@ -108,7 +108,7 @@ export function Sidebar({ handle, view }: { handle: DocHandle | null; view: Work
   const ws = useApp(currentWorkspace)
   const switcher = useMenuAnchor()
   const readonly = ws?.role === 'viewer'
-  const inbox = useInbox((s) => (ws?.accountId ? s.byAccount[ws.accountId] : undefined))
+  const inbox = useInbox(inboxSelector(ws?.accountId))
   const showInbox = useInbox((s) => s.show)
 
   const importNotes = async () => {

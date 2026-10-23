@@ -20,6 +20,19 @@ type State = {
 
 const empty: Inbox = { items: [], unread: 0 }
 
+/// The empty inbox, one object for the whole app. A selector that builds a
+/// new one every time would never settle: React compares the snapshot of a
+/// store with the last one and re-renders as long as they differ, which ends
+/// in "Maximum update depth exceeded" and a blank window.
+export const EMPTY_INBOX: Inbox = empty
+
+/// Picks one account's inbox out of the store. Always the same object for
+/// the same state, so it can be used as a store selector.
+export const inboxSelector =
+  (accountId: string | null | undefined) =>
+  (s: State): Inbox =>
+    (accountId ? s.byAccount[accountId] : undefined) ?? EMPTY_INBOX
+
 export const useInbox = create<State>((set, get) => ({
   byAccount: {},
   open: false,

@@ -1,7 +1,7 @@
 /// The inbox: mentions and replies, newest first.
 import { AtSign, MessageSquareReply } from 'lucide-react'
-import { useEffect } from 'react'
-import { type Notification, useInbox } from '../lib/inbox'
+import { type Notification, inboxSelector, useInbox } from '../lib/inbox'
+import { CommentBody } from './CommentPanel'
 import { Button, Dialog } from './ui'
 
 const ago = (ms: number) => {
@@ -25,17 +25,14 @@ export function InboxDialog({
   accountId: string | null
   onOpen: (n: Notification) => void
 }) {
-  const inbox = useInbox((s) => (accountId ? (s.byAccount[accountId] ?? { items: [], unread: 0 }) : { items: [], unread: 0 }))
+  const inbox = useInbox(inboxSelector(accountId))
   const markRead = useInbox((s) => s.markRead)
 
-  useEffect(() => {
-    if (!open || !accountId) return
-    const unread = inbox.items.filter((n) => n.readAt === null).map((n) => n.id)
-    if (unread.length) void markRead(accountId, unread)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, accountId])
-
+  // Opening one item is what marks it read, not opening the box: the dot and
+  // the sidebar badge are there to show what is new, and they would mean
+  // nothing if they emptied the moment the box appeared.
   const openItem = (n: Notification) => {
+    if (n.readAt === null && accountId) void markRead(accountId, [n.id])
     onOpen(n)
     onClose()
   }
@@ -59,14 +56,16 @@ export function InboxDialog({
                 <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
                   {n.kind === 'mention' ? <AtSign size={13} /> : <MessageSquareReply size={13} />}
                 </span>
-                <span className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-1.5 text-[12px]">
                     <span className="font-semibold text-ink">{n.authorName || 'Someone'}</span>
                     <span className="text-ink-3">{ago(n.createdAt)}</span>
                     {n.readAt === null && <span className="size-1.5 rounded-full bg-accent" />}
                   </span>
-                  <span className="mt-0.5 line-clamp-2 block text-[13px] text-ink-2">{n.body}</span>
-                </span>
+                  <div className="mt-0.5 text-[13px] text-ink-2">
+                    <CommentBody text={n.body} className="line-clamp-2" />
+                  </div>
+                </div>
               </button>
             </li>
           ))}

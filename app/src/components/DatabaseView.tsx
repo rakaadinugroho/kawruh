@@ -1,6 +1,6 @@
 /// A database page: a table of rows with typed properties, and a board view
 /// that groups the rows by their first `select` column.
-import { Plus, Trash2, Type as TypeIcon, LayoutGrid, Table2, X } from 'lucide-react'
+import { ChevronDown, LayoutGrid, Plus, Table2, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import {
@@ -344,7 +344,7 @@ function ColumnHeader({
             className="size-5"
             onClick={(e) => menu.openFrom(e.currentTarget)}
           >
-            <TypeIcon size={12} />
+            <ChevronDown size={12} />
           </IconButton>
         )}
       </div>
@@ -465,7 +465,9 @@ function BoardView({
     ),
   ]
   const groups = [...options, ...extra, '']
-  const others = columns.filter((c) => c.id !== group.id)
+  // The card shows the title as its heading, so that column is left out.
+  const title = columns.find((c) => c.type === 'title')
+  const others = columns.filter((c) => c.id !== group.id && c.id !== title?.id)
 
   const cardsOf = (option: string) =>
     rows.filter((r) => {
@@ -502,7 +504,6 @@ function BoardView({
           </h3>
           <div className="flex flex-col gap-1.5">
             {cardsOf(option).map((row) => {
-              const title = columns.find((c) => c.type === 'title')
               return (
                 <article
                   key={row.id}
