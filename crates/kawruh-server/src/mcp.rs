@@ -707,7 +707,7 @@ impl KawruhMcp {
     }
 
     #[tool(
-        description = "List the comments on a page as threads: the comment, who wrote it and when, and the replies under it."
+        description = "List the comments on a page as threads: the comment, who wrote it and when, and the replies under it. Every comment carries its id, which is what add_comment replies to."
     )]
     async fn list_comments(
         &self,
@@ -738,7 +738,12 @@ impl KawruhMcp {
                     &c.author_name
                 };
                 let marker = if c.id == root.id { "" } else { "  reply: " };
-                out.push_str(&format!("{marker}- {who}: {}\n", c.body.replace('\n', " ")));
+                // The id is what `add_comment` takes to answer this comment.
+                out.push_str(&format!(
+                    "{marker}- [{}] {who}: {}\n",
+                    c.id,
+                    c.body.replace('\n', " ")
+                ));
             }
             out.push('\n');
         }

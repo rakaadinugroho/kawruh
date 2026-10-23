@@ -883,6 +883,10 @@ async fn mcp_comments_notify_the_people_they_mention() {
     assert!(!err, "{text}");
     assert!(text.contains("reads fine to me"), "{text}");
     assert!(text.contains("does this read right?"), "{text}");
+    // Every comment carries its id, so an agent can answer one without
+    // having to write it first.
+    assert!(text.contains(root.as_str()), "{text}");
+    assert_eq!(text.matches(&root).count(), 1, "{text}");
 }
 
 #[tokio::test]

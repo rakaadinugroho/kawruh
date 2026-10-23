@@ -164,7 +164,7 @@ Pages an agent deletes go to the Trash, and you can restore them in the app.
 | `upload_image` | `workspace_id`, `data_base64`, `mime` (png \| jpeg \| gif \| webp \| avif), `alt?`, `page_id?` | Store an image; returns its markdown `![alt](kawruh-asset://…)`, and appends it to `page_id` if given |
 | `list_backlinks` | `page_id` | Pages in the same workspace that link to this page, as `- Title (page_id)` |
 | `share_page` | `page_id` | Create (or return) the page's public read-only link; returns the URL |
-| `list_comments` | `page_id` | The page's comments as threads, each with its author and the text it is about |
+| `list_comments` | `page_id` | The page's comments as threads, each with its id, its author and the text it is about |
 | `add_comment` | `page_id`, `body`, `reply_to?` | Write a comment, or a reply in an existing thread (editor+) |
 | `query_database` | `page_id`, `column?`, `value?`, `limit?` | The rows of a database page as a markdown table; with `column` only the rows whose cell holds `value` are returned |
 
@@ -193,8 +193,8 @@ Page bodies are GitHub-flavoured markdown. Titles are not part of the body; use
   live in open editors. Mention someone with `@[Name](kawruh://user/<user_id>)`
   (the id is their user id) and they get a notification; so does everyone else in
   a thread you reply to. `list_comments` shows what is already there, including
-  the replies. Comments are not part of the markdown — `read_page` won't show
-  them.
+  the replies, and prints the id of every comment — that is what `reply_to`
+  takes. Comments are not part of the markdown — `read_page` won't show them.
 - **Search** reads an index refreshed about two seconds after each edit.
 
 ## Databases
