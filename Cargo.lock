@@ -2308,7 +2308,7 @@ dependencies = [
 
 [[package]]
 name = "kawruh"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "kawruh-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "comrak",
  "futures-util",
@@ -2360,7 +2360,7 @@ dependencies = [
 
 [[package]]
 name = "kawruh-server"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "argon2",
