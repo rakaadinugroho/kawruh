@@ -566,6 +566,10 @@ mod tests {
         assert_eq!(rows[0].get("status").text(), "Doing");
         // And it reads as the markdown table an export carries.
         assert!(to_markdown(&doc).unwrap().contains("Write the docs"));
+        // An export keeps the database itself, so an import brings it back.
+        let export = page_markdown(&doc, true);
+        assert!(export.contains("```kawruh-database"), "{export}");
+        assert!(from_block(&export).is_some(), "{export}");
     }
 
     fn doc_with(rows: &[(&str, &str, &str)]) -> Doc {
