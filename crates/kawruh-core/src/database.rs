@@ -170,12 +170,31 @@ impl Row {
 
 // ---- the schema ------------------------------------------------------------
 
+/// A root map of a page, if it has one.
+///
+/// A map the editor wrote (Yjs) arrives without the type marker yrs keeps for
+/// root types, so `txn.get` calls it undefined even though the data is there.
+/// `get_or_insert_map` reads such a map and marks it as a map, which is how
+/// the comment map is read too. `None` means the page has no such map, and
+/// the document is left alone.
+fn root_map(doc: &Doc, name: &str) -> Option<MapRef> {
+    let txn = doc.transact();
+    match txn.get(name) {
+        Some(Out::YMap(map)) => Some(map),
+        Some(Out::UndefinedRef(_)) => {
+            drop(txn);
+            Some(doc.get_or_insert_map(name))
+        }
+        _ => None,
+    }
+}
+
 /// The properties of a database page, in order.
 pub fn schema(doc: &Doc) -> Vec<Property> {
-    let txn = doc.transact();
-    let Some(Out::YMap(map)) = txn.get(SCHEMA) else {
+    let Some(map) = root_map(doc, SCHEMA) else {
         return Vec::new();
     };
+    let txn = doc.transact();
     let Some(Out::Any(Any::String(raw))) = map.get(&txn, "value") else {
         return Vec::new();
     };
@@ -192,10 +211,10 @@ pub fn set_schema(doc: &Doc, properties: &[Property], origin: &str) {
 
 /// The view a database opens in ("table" or "board").
 pub fn view(doc: &Doc) -> String {
-    let txn = doc.transact();
-    let Some(Out::YMap(map)) = txn.get(VIEW) else {
+    let Some(map) = root_map(doc, VIEW) else {
         return "table".to_string();
     };
+    let txn = doc.transact();
     match map.get(&txn, "value") {
         Some(Out::Any(Any::String(s))) => s.to_string(),
         _ => "table".to_string(),
@@ -239,10 +258,10 @@ fn row_map<'a, T: ReadTxn>(rows: &'a MapRef, txn: &'a T, id: &str) -> Option<Map
 
 /// The rows of a database page, in the order they were created.
 pub fn rows(doc: &Doc) -> Vec<Row> {
-    let txn = doc.transact();
-    let Some(Out::YMap(rows_map)) = txn.get(ROWS) else {
+    let Some(rows_map) = root_map(doc, ROWS) else {
         return Vec::new();
     };
+    let txn = doc.transact();
     let mut out: Vec<Row> = rows_map
         .iter(&txn)
         .filter_map(|(id, v)| match v {
@@ -521,6 +540,33 @@ fn json_to_cell(value: &serde_json::Value) -> Cell {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A database the app wrote: Yjs puts no type marker on a root map, so
+    /// this is the only way to check that such a document is readable here.
+    /// `app/tests/contract.test.ts` writes the file (see `scripts/contract.sh`).
+    #[test]
+    fn a_database_written_by_the_editor_is_readable() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/out/database.js.bin");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return; // the editor test has not run yet
+        };
+        let doc = Doc::new();
+        crate::protocol::apply_update(&doc, &bytes, "test").expect("the editor's document decodes");
+
+        let db = database(&doc).expect("the editor's database is a database");
+        assert_eq!(db.columns.len(), 2);
+        assert_eq!(db.columns[0].kind, "title");
+        assert_eq!(db.columns[1].options, ["Todo", "Doing"]);
+        assert_eq!(view(&doc), "board");
+
+        let rows = rows(&doc);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("name").text(), "Write the docs");
+        assert_eq!(rows[0].get("status").text(), "Doing");
+        // And it reads as the markdown table an export carries.
+        assert!(to_markdown(&doc).unwrap().contains("Write the docs"));
+    }
 
     fn doc_with(rows: &[(&str, &str, &str)]) -> Doc {
         let doc = Doc::new();

@@ -14,6 +14,7 @@ import { prosemirrorToYDoc, yXmlFragmentToProseMirrorRootNode } from 'y-prosemir
 import * as Y from 'yjs'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { kawruhSchema } from '../src/editor/schema'
+import { addRow, writeCell, writeSchema, writeView } from '../src/lib/database'
 
 /// Cross-language contract between the Rust converter (kawruh-core) and the
 /// editor. Run `cargo test -p kawruh-core` first: it writes `out/*.rs.bin`.
@@ -88,4 +89,19 @@ describe('editor → Rust', () => {
       writeFileSync(resolve(out, `${name}.js.bin`), Y.encodeStateAsUpdate(ydoc))
     })
   }
+
+  // A database lives in root maps rather than in the prose, and the app writes
+  // them with Yjs: the Rust side has to read exactly these bytes.
+  it('database: writes a database the way the app does', () => {
+    const doc = new Y.Doc()
+    writeSchema(doc, [
+      { id: 'name', name: 'Name', type: 'title' },
+      { id: 'status', name: 'Status', type: 'select', options: ['Todo', 'Doing'] },
+    ])
+    writeView(doc, 'board')
+    const id = addRow(doc)
+    writeCell(doc, id, 'name', 'Write the docs')
+    writeCell(doc, id, 'status', 'Doing')
+    writeFileSync(resolve(out, 'database.js.bin'), Y.encodeStateAsUpdate(doc))
+  })
 })
