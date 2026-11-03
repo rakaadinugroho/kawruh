@@ -2310,10 +2310,12 @@ dependencies = [
 name = "kawruh"
 version = "0.5.1"
 dependencies = [
+ "axum",
  "base64 0.22.1",
  "block2",
  "hex",
  "kawruh-core",
+ "kawruh-mcp",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -2359,6 +2361,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kawruh-mcp"
+version = "0.5.1"
+dependencies = [
+ "base64 0.22.1",
+ "http",
+ "kawruh-core",
+ "rmcp",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "yrs",
+]
+
+[[package]]
 name = "kawruh-server"
 version = "0.5.1"
 dependencies = [
@@ -2370,6 +2386,7 @@ dependencies = [
  "hex",
  "http",
  "kawruh-core",
+ "kawruh-mcp",
  "libc",
  "rand 0.9.5",
  "reqwest 0.13.5",

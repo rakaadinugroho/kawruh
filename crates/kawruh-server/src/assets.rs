@@ -247,6 +247,52 @@ pub async fn store(
     Ok((name, created))
 }
 
+/// The synchronous twin of [`store`] for plain-thread callers (the MCP
+/// backend is a sync trait): same checks, same atomic temp-file commit,
+/// `std::fs` only — so it also works under a current-thread test runtime.
+pub fn store_sync(
+    state: &AppState,
+    workspace_id: &str,
+    ext: &str,
+    bytes: &[u8],
+) -> ApiResult<(String, bool)> {
+    use std::io::Write;
+    let max = state.cfg.max_asset_bytes();
+    if bytes.len() as u64 > max {
+        return Err(too_large(max));
+    }
+    if !state.docs.writes_allowed() {
+        return Err(disk_full());
+    }
+    let name = format!("{}.{ext}", hex::encode(Sha256::digest(bytes)));
+    if !valid_id(workspace_id) || parse_name(&name).is_none() {
+        return Err(bad_name());
+    }
+    let dir = workspace_dir(&state.cfg.data_dir, workspace_id);
+    std::fs::create_dir_all(&dir).map_err(ApiError::internal)?;
+    let dest = dir.join(&name);
+    if dest.exists() {
+        return Ok((name, false));
+    }
+    let tmp = temp_path(&dir, &name);
+    let written = std::fs::File::create(&tmp).and_then(|mut f| {
+        f.write_all(bytes)?;
+        f.sync_all()
+    });
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(ApiError::internal(e));
+    }
+    let result = check_quota(state, workspace_id, bytes.len() as u64).and_then(|_| {
+        std::fs::rename(&tmp, &dest).map_err(ApiError::internal)?;
+        Ok(true)
+    });
+    if !matches!(result, Ok(true)) {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result.map(|created| (name, created))
+}
+
 /// Streams `body` into `tmp`, enforcing `max`; returns (size, sha256 hex).
 async fn receive(body: Body, tmp: &Path, max: u64) -> ApiResult<(u64, String)> {
     let mut file = tokio::fs::File::create(tmp)

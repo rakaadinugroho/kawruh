@@ -1,14 +1,22 @@
 import { Copy, KeyRound, LogOut, Plus, Trash2, UserPlus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { DocFont, DocSize } from '../lib/appearance'
-import { type ApiToken, type AppInfo, api } from '../lib/ipc'
+import { useAssistAgent } from '../lib/assist'
+import {
+  type ApiToken,
+  type AppInfo,
+  type McpLocalState,
+  type Registration,
+  api,
+  errorMessage,
+} from '../lib/ipc'
 import { useApp } from '../lib/store'
 import { thisDevice } from '../lib/platform'
 import { AccountForm } from './AccountForm'
 import { host } from './Sidebar'
-import { Button, Dialog, Field, IconButton, copyText, inputClass } from './ui'
+import { Button, Dialog, Field, IconButton, Kbd, copyText, inputClass } from './ui'
 
-type Tab = 'accounts' | 'appearance' | 'tokens' | 'about'
+type Tab = 'accounts' | 'assist' | 'agents' | 'appearance' | 'tokens' | 'about'
 
 export function SettingsDialog({ open, tab: initialTab, onClose }: {
   open: boolean
@@ -26,6 +34,8 @@ export function SettingsDialog({ open, tab: initialTab, onClose }: {
         {(
           [
             ['accounts', 'Accounts'],
+            ['assist', 'Assist'],
+            ['agents', 'Agents'],
             ['appearance', 'Appearance'],
             ['tokens', 'API tokens'],
             ['about', 'About'],
@@ -46,10 +56,233 @@ export function SettingsDialog({ open, tab: initialTab, onClose }: {
         ))}
       </div>
       {tab === 'accounts' && <AccountsTab />}
+      {tab === 'assist' && <AssistTab />}
+      {tab === 'agents' && <AgentsTab />}
       {tab === 'appearance' && <AppearanceTab />}
       {tab === 'tokens' && <TokensTab />}
       {tab === 'about' && <AboutTab />}
     </Dialog>
+  )
+}
+
+/// Which agent answers Assist, and the short manual for it.
+function AssistTab() {
+  const { agents, chosen, choose } = useAssistAgent()
+  return (
+    <div className="flex flex-col gap-5">
+      <section>
+        <h3 className="mb-1 text-[12px] font-medium text-ink-2">Who helps you write</h3>
+        <p className="mb-2.5 text-[12.5px] text-ink-2">
+          Assist runs the AI agents already installed on this computer; Kawruh
+          itself keeps no provider accounts or API keys. The one picked here
+          answers by default.
+        </p>
+        <div className="grid grid-cols-1 gap-2" role="radiogroup" aria-label="Assist agent">
+          {agents.map((agent) => {
+            const selected = chosen?.id === agent.id
+            return (
+              <button
+                key={agent.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={!agent.available}
+                onClick={() => choose(agent.id)}
+                className={`press flex flex-col items-start gap-0.5 rounded-lg p-3 text-left ${
+                  selected
+                    ? 'bg-accent-soft shadow-[inset_0_0_0_1.5px_var(--accent)]'
+                    : 'shadow-[inset_0_0_0_1px_var(--line)] hover:bg-hover'
+                } ${agent.available ? '' : 'opacity-55'}`}
+              >
+                <span className="text-[13px] font-medium text-ink">{agent.label}</span>
+                <span className="text-[11px] text-ink-3 font-mono break-all">
+                  {agent.available ? agent.path : `Not found — the ${agent.id} CLI isn't installed`}
+                </span>
+              </button>
+            )
+          })}
+          {agents.length === 0 && (
+            <p className="text-[12.5px] text-ink-3">Looking for agents…</p>
+          )}
+        </div>
+      </section>
+      <section>
+        <h3 className="mb-1 text-[12px] font-medium text-ink-2">How it works</h3>
+        <p className="text-[12.5px] leading-[1.6] text-ink-2">
+          Select text and press <Kbd>⌘J</Kbd> to have the agent rewrite it —
+          every change shows up and you apply it or not. In an empty block,
+          type <code className="font-mono">'/'</code> and pick “Draft with AI”
+          to have one drafted where the cursor is. Everything arrives as plain
+          markdown, so nothing mysterious lands in the page.
+        </p>
+      </section>
+    </div>
+  )
+}
+
+/// A small switch matching the app's buttons (no shared Toggle exists).
+function Switch({ on, label, onChange }: { on: boolean; label: string; onChange: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      data-testid="mcp-toggle"
+      onClick={onChange}
+      className={`press h-5 w-9 shrink-0 rounded-full p-0.5 ${on ? 'bg-accent' : 'bg-line'}`}
+    >
+      <span
+        className={`block size-4 rounded-full bg-white shadow transition-transform ${
+          on ? 'translate-x-4' : ''
+        }`}
+      />
+    </button>
+  )
+}
+
+/// The local MCP endpoint: agents on this computer (claude, opencode, agy)
+/// read and edit the workspaces that only live on this Mac, authorized with
+/// the token below. Server-backed workspaces stay out of it.
+function AgentsTab() {
+  const [state, setState] = useState<McpLocalState | null>(null)
+  const [regs, setRegs] = useState<Registration[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [revealed, setRevealed] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    api.mcpLocalState().then(setState).catch((e) => setError(errorMessage(e)))
+    api.mcpStatus().then(setRegs).catch(() => {})
+  }, [])
+
+  const toggle = async () => {
+    setError('')
+    try {
+      setState(await api.mcpLocalSet(!state?.enabled))
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  const register = async (id: string, connect: boolean) => {
+    setBusy(id)
+    setError('')
+    try {
+      setRegs(await api.mcpRegister(id, connect))
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <section>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="mb-1 text-[12px] font-medium text-ink-2">Local MCP endpoint</h3>
+            <p className="mb-2.5 max-w-[36ch] text-[12.5px] text-ink-2">
+              Agents on this computer can read and edit the workspaces that
+              never leave this Mac — pages update live while you watch. Workspaces
+              that sync to a server stay out of it.
+            </p>
+          </div>
+          <Switch on={!!state?.enabled} label="Local MCP endpoint" onChange={toggle} />
+        </div>
+        <div
+          className={`flex flex-col gap-1.5 rounded-lg p-3 font-mono text-[11.5px] ${
+            state?.enabled ? 'bg-hover' : 'bg-hover opacity-55'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-ink-2">URL</span>
+            <span className="flex items-center gap-1 text-ink" data-testid="mcp-url">
+              {state?.url ?? '…'}
+              {state?.url && (
+                <IconButton label="Copy URL" className="size-5" onClick={() => copyText(state.url)}>
+                  <Copy size={12} />
+                </IconButton>
+              )}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-ink-2">Token</span>
+            <span className="flex items-center gap-1 text-ink" data-testid="mcp-token">
+              {revealed && state ? state.token : '••••••••••••'}
+              <button
+                type="button"
+                className="press px-1 text-[11px] font-sans text-accent"
+                onClick={() => setRevealed(!revealed)}
+              >
+                {revealed ? 'Hide' : 'Show'}
+              </button>
+              {state?.token && (
+                <IconButton label="Copy token" className="size-5" onClick={() => copyText(state.token)}>
+                  <Copy size={12} />
+                </IconButton>
+              )}
+            </span>
+          </div>
+          <span className="text-[10.5px] text-ink-3 font-sans">
+            {state?.enabled
+              ? state.running
+                ? `Running on 127.0.0.1:${state.port}`
+                : 'Starting…'
+              : 'Off — agents cannot connect'}
+          </span>
+        </div>
+      </section>
+      <section>
+        <h3 className="mb-1 text-[12px] font-medium text-ink-2">Connect an agent</h3>
+        <p className="mb-2.5 text-[12.5px] text-ink-2">
+          Kawruh writes itself into the agent's own configuration — its other
+          servers stay as they are. The agent picks the connection up on its
+          next start.
+        </p>
+        <div className="grid grid-cols-1 gap-2">
+          {regs.map((r) => (
+            <div
+              key={r.id}
+              className="flex items-center justify-between gap-2 rounded-lg p-3 shadow-[inset_0_0_0_1px_var(--line)]"
+            >
+              <div className="min-w-0">
+                <span className="text-[13px] font-medium text-ink">{r.label}</span>
+                <span className="block truncate text-[11px] text-ink-3">
+                  {!r.available
+                    ? `Not found — the ${r.id} CLI isn't installed`
+                    : r.connected
+                      ? 'Connected to this Kawruh'
+                      : 'Not connected'}
+                </span>
+              </div>
+              {r.available && (
+                <Button
+                  type="button"
+                  variant={r.connected ? 'ghost' : 'primary'}
+                  disabled={busy === r.id || !state?.running}
+                  onClick={() => register(r.id, !r.connected)}
+                >
+                  {r.connected ? 'Disconnect' : 'Connect'}
+                </Button>
+              )}
+            </div>
+          ))}
+          {regs.length === 0 && <p className="text-[12.5px] text-ink-3">Looking for agents…</p>}
+        </div>
+        {!state?.running && (
+          <p className="mt-2 text-[11.5px] text-ink-3">
+            Turn the endpoint on to connect an agent.
+          </p>
+        )}
+      </section>
+      {error && (
+        <p className="text-[12.5px] text-danger" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
   )
 }
 

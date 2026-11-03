@@ -56,6 +56,23 @@ Their edits show up live for everyone with the page open.
 Agents see only workspaces published to the server. Setup for the other clients,
 the full tool list, and tips are in [docs/MCP.md](docs/MCP.md).
 
+**No server?** The desktop app can serve your *local* workspaces itself:
+**Settings → Agents** turns on an endpoint on this Mac (bearer-token protected)
+and can register it straight into the Claude Code, OpenCode and Antigravity
+CLIs installed there. Only workspaces that never leave this computer are
+served; shared pages and server-backed workspaces need the server endpoint.
+
+## Let an agent help you write (Assist)
+
+Select text and press **⌘J** to have an AI agent rewrite it, or in an empty
+block type `/` and pick **Draft with AI**. Nothing touches the page until you
+approve it: the suggestion shows up first, you apply it or throw it away, and
+an applied edit is one ordinary undo step.
+
+Assist runs the agent CLIs already on this computer (`claude`, `opencode`,
+`agy`) with their own accounts — Kawruh stores no API keys. Pick one in
+**Settings → Assist**; install one, restart Kawruh, and it appears there.
+
 ## How it fits together
 
 ```

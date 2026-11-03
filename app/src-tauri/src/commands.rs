@@ -26,6 +26,9 @@ pub struct AppState {
     pub history: Arc<crate::history::History>,
     pub remote: Remote,
     pub data_dir: std::path::PathBuf,
+    pub assists: crate::agents::Worker,
+    /// The local MCP endpoint the agents on this computer connect to.
+    pub mcp: Arc<crate::mcp_server::McpRuntime>,
 }
 
 const WELCOME: &str = include_str!("welcome.md");

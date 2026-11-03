@@ -4,6 +4,7 @@
 pub mod comments;
 pub mod database;
 pub mod markdown;
+pub mod mcp;
 pub mod protocol;
 pub mod schema;
 pub mod store;

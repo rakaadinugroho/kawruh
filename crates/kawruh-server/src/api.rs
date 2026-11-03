@@ -594,7 +594,7 @@ pub fn ensure_share(
     state: &AppState,
     workspace_id: &str,
     page_id: &str,
-    user: &User,
+    created_by: &str,
 ) -> ApiResult<db::Share> {
     let ws = state
         .docs
@@ -624,7 +624,7 @@ pub fn ensure_share(
     };
     conn.execute(
         "INSERT INTO shares (token, workspace_id, page_id, created_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![s.token, s.workspace_id, s.page_id, user.id, s.created_at],
+        params![s.token, s.workspace_id, s.page_id, created_by, s.created_at],
     )?;
     Ok(s)
 }
@@ -636,7 +636,7 @@ pub async fn create_share(
     Body(req): Body<ShareReq>,
 ) -> ApiResult<Json<Value>> {
     require_role(&state, &id, &me.user, Role::Editor)?;
-    let share = ensure_share(&state, &id, &req.page_id, &me.user)?;
+    let share = ensure_share(&state, &id, &req.page_id, &me.user.id)?;
     let mut v = share_json(&state, &share);
     if let Some(o) = v.as_object_mut() {
         o.remove("created_at");

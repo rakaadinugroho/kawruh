@@ -1,0 +1,18 @@
+[package]
+name = "kawruh-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Kawruh's MCP tool set, shared by the desktop app and the server"
+
+[dependencies]
+kawruh-core = { path = "../kawruh-core" }
+rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server"] }
+schemars = "1"
+http = "1"
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+yrs.workspace = true

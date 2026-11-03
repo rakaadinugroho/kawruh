@@ -14,6 +14,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 kawruh-core = { path = "../../crates/kawruh-core", features = ["tls"] }
+kawruh-mcp = { path = "../../crates/kawruh-mcp" }
+# The local MCP endpoint for agents on this computer (its transport).
+axum = "0.8"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"

@@ -127,6 +127,19 @@ stores it securely:
 Any MCP client that supports streamable HTTP with a custom header works the same
 way: use the URL `<server>/mcp` and the header `Authorization: Bearer kwr_…`.
 
+### Without a server: the desktop's local endpoint
+
+The desktop app can serve your local workspaces itself — no kawruh-server
+involved. In the app, open **Settings → Agents**, turn the endpoint on, and
+press **Connect** next to an agent CLI installed on this Mac (Claude Code,
+OpenCode, Antigravity): Kawruh writes the connection into that CLI's own
+configuration and nothing else about it changes. Other MCP clients work too:
+copy the URL and token shown in Settings and connect as above.
+
+The local endpoint serves only workspaces that never left this computer; pages
+synced with a server (and their public share links) live behind the server's
+`/mcp` instead.
+
 ## 3. Check it works
 
 - **Claude Code:** `claude mcp list` should show `kawruh` as connected. Inside a

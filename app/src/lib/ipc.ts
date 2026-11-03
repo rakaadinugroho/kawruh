@@ -68,6 +68,20 @@ export type ApiToken = {
 export type DocEvent = { type: 'update' | 'awareness'; update: string }
 export type AppInfo = { version: string; dataDir: string }
 
+/// An agent CLIs that can answer Assist prompts (see Settings → Assist).
+export type AgentInfo = { id: string; label: string; path: string; available: boolean }
+
+/// The desktop's own MCP endpoint (see Settings → Agents).
+export type McpLocalState = { enabled: boolean; running: boolean; port: number; url: string; token: string }
+/// One agent CLI's standing against it.
+export type Registration = { id: string; label: string; available: boolean; connected: boolean }
+
+/// Progress of an assist run: its id first, then the text or an error.
+export type AssistEvent =
+  | { type: 'start'; id: string }
+  | { type: 'text'; text: string }
+  | { type: 'error'; message: string }
+
 /// A mention or a reply the user should look at.
 export type Notification = {
   id: string
@@ -198,4 +212,21 @@ export const api = {
 
   settingGet: (key: string) => invoke<string | null>('setting_get', { key }),
   settingSet: (key: string, value: string) => invoke<void>('setting_set', { key, value }),
+
+  /// The AI CLIs found on this computer (claude, opencode, agy).
+  agentsList: () => invoke<AgentInfo[]>('agents_list'),
+  /// Runs one assist prompt through an agent; progress lands on the channel,
+  /// the return value is the run id (pass it to `assistCancel` to stop it).
+  assistRun: (agent: string, prompt: string, channel: Channel<AssistEvent>) =>
+    invoke<string>('assist_run', { agent, prompt, channel }),
+  assistCancel: (runId: string) => invoke<void>('assist_cancel', { runId }),
+
+  /// The local MCP endpoint (Settings → Agents): its state, or the one the
+  /// toggle landed on; the URL/token is what agents get registered with.
+  mcpLocalState: () => invoke<McpLocalState>('mcp_local_state'),
+  mcpLocalSet: (enabled: boolean) => invoke<McpLocalState>('mcp_local_set', { enabled }),
+  /// How each agent CLI stands; `mcpRegister` connects or disconnects one.
+  mcpStatus: () => invoke<Registration[]>('mcp_status'),
+  mcpRegister: (agent: string, connect: boolean) =>
+    invoke<Registration[]>('mcp_register', { agent, connect }),
 }

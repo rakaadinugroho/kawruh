@@ -1,3 +1,4 @@
+mod agents;
 mod assets;
 mod commands;
 mod db;
@@ -7,8 +8,11 @@ mod error;
 mod history;
 mod hub;
 mod linkmeta;
+mod mcp;
+mod mcp_server;
 mod opened;
 mod pdf;
+mod register;
 mod remote;
 mod search;
 mod sync;
@@ -140,6 +144,10 @@ pub fn run() {
             let sync = SyncManager::new(hub.clone(), app.handle().clone());
             let search = Arc::new(search::SearchIndex::default());
             let history = Arc::new(history::History::default());
+            let mcp = Arc::new(mcp_server::McpRuntime::new(
+                Arc::clone(&hub),
+                Arc::clone(&search),
+            ));
             tauri::async_runtime::spawn(event_loop(
                 app.handle().clone(),
                 hub.clone(),
@@ -155,11 +163,21 @@ pub fn run() {
                 history,
                 remote: remote::Remote::new(),
                 data_dir: dir,
+                assists: agents::Worker::default(),
+                mcp: mcp.clone(),
             });
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = handle.state::<AppState>().start_all_syncs() {
                     tracing::error!("starting sync failed: {e}");
+                }
+            });
+            // The stored Settings toggle decides whether agents may connect.
+            tauri::async_runtime::spawn(async move {
+                if mcp.enabled_setting()
+                    && let Err(e) = mcp.start().await
+                {
+                    tracing::warn!("the mcp endpoint did not start: {e}");
                 }
             });
             #[cfg(debug_assertions)]
@@ -218,6 +236,13 @@ pub fn run() {
         commands::link_preview,
         commands::setting_get,
         commands::setting_set,
+        agents::agents_list,
+        agents::assist_run,
+        agents::assist_cancel,
+        mcp_server::mcp_local_state,
+        mcp_server::mcp_local_set,
+        register::mcp_status,
+        register::mcp_register,
         e2e::e2e_result,
     ]);
     #[cfg(not(debug_assertions))]
@@ -268,6 +293,13 @@ pub fn run() {
         commands::link_preview,
         commands::setting_get,
         commands::setting_set,
+        agents::agents_list,
+        agents::assist_run,
+        agents::assist_cancel,
+        mcp_server::mcp_local_state,
+        mcp_server::mcp_local_set,
+        register::mcp_status,
+        register::mcp_register,
     ]);
 
     builder

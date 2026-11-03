@@ -127,7 +127,11 @@ button {
   }
 
   /* Dialogs: native <dialog> for focus trapping; fade + slight scale in. */
-  dialog.kw-dialog {
+  dialog/* Assist preview: what the agent would add or remove, line by line. */
+.kw-assist-add { background-color: color-mix(in oklch, var(--accent) 11%, transparent); }
+.kw-assist-del { background-color: color-mix(in oklch, var(--danger) 13%, transparent); }
+
+.kw-dialog {
     margin: auto;
     padding: 0;
     border: none;
