@@ -396,7 +396,7 @@ mod tests {
         let e = "é".repeat(150);
         let cut = last_bytes(&e, 5);
         // A char-boundary cut stays a multiple of the é byte length (2).
-        assert_eq!(cut.bytes().count() % 2, 0);
+        assert_eq!(cut.len() % 2, 0);
         assert!(e.ends_with(&cut));
     }
 

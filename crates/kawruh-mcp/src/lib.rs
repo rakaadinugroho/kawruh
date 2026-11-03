@@ -893,8 +893,7 @@ mod tests {
     fn the_body_limit_grows_with_the_asset_cap() {
         // One megabyte of base64 per megabyte of image, plus a small margin:
         // only checks that a stub backend wires up as a service.
-        let service = service(std::sync::Arc::new(NullBackend), 6 * 1024 * 1024);
-        let _ = std::mem::forget(service);
+        let _ = service(std::sync::Arc::new(NullBackend), 6 * 1024 * 1024);
     }
 
     struct NullBackend;

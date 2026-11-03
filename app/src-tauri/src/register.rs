@@ -120,7 +120,7 @@ fn claude_connected(url: &str) -> bool {
 
 /// opencode (v2) nests remote servers under `mcp.servers`; older configs had
 /// them directly under `mcp` — counted either way, written only the new way.
-fn opencode_entry<'v>(v: &'v Value) -> Option<&'v Value> {
+fn opencode_entry(v: &Value) -> Option<&Value> {
     v.pointer("/mcp/servers")?
         .get(SERVER_NAME)
         .or_else(|| v.get("mcp")?.get(SERVER_NAME))
