@@ -308,7 +308,11 @@ fn via_shell(bin: &str) -> Option<PathBuf> {
     if !out.status.success() {
         return None;
     }
-    let first = String::from_utf8_lossy(&out.stdout).lines().next()?.trim();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let Some(first) = stdout.lines().next() else {
+        return None;
+    };
+    let first = first.trim();
     if first.contains('\\') {
         Some(first.into())
     } else {
